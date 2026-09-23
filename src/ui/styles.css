@@ -1,0 +1,175 @@
+/*
+ * section の色は File Layout・Hex Viewer・Header Inspector の chip で共通にする。
+ * 同じ領域が同じ色で現れることが「論理 ↔ 物理」の対応を読む手がかりになるため。
+ */
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --text: #1c2330;
+  --dim: #6b7585;
+  --line: #e1e5eb;
+  --accent: #2f6fdb;
+  --sel: #ffcc33;
+  --sel-text: #1c2330;
+  --error: #c9362b;
+
+  --c-header: #8a5cf6;
+  --c-root: #2f7fe0;
+  --c-metadata: #e09a1a;
+  --c-leaf: #1f9d6b;
+  --c-tile: #7d8796;
+  --c-gap: #c7ccd4;
+
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12161d;
+    --panel: #1a2029;
+    --text: #e3e8ef;
+    --dim: #8e98a8;
+    --line: #2b3340;
+    --accent: #6ea3ff;
+    --sel: #ffcf40;
+    --c-header: #a585ff;
+    --c-root: #5a9dff;
+    --c-metadata: #f0b43c;
+    --c-leaf: #3cc48f;
+    --c-tile: #8f99a8;
+    --c-gap: #3a424f;
+  }
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.5 var(--sans); }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.dim { color: var(--dim); }
+.error { color: var(--error); }
+.empty { color: var(--dim); margin: 8px 0; }
+.note { color: var(--dim); margin: 0 0 8px; }
+button, select { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button:disabled { opacity: 0.4; cursor: default; }
+button.primary { background: var(--accent); color: #fff; border-color: transparent; }
+
+.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
+.topbar h1 { font-size: 15px; margin: 0; letter-spacing: 0.02em; }
+#opener { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.status { color: var(--dim); }
+.status.error { color: var(--error); }
+
+.grid {
+  display: grid;
+  gap: 12px;
+  padding: 12px 16px 24px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  grid-template-areas:
+    "layout layout"
+    "header hex"
+    "meta reads";
+}
+#p-layout { grid-area: layout; }
+#p-header { grid-area: header; }
+#p-hex { grid-area: hex; }
+#p-meta { grid-area: meta; }
+#p-reads { grid-area: reads; }
+@media (max-width: 900px) {
+  .grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "layout" "header" "hex" "meta" "reads"; }
+}
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; min-width: 0; display: flex; flex-direction: column; }
+.panel h2 { font-size: 13px; margin: 0; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.panel h2 small { color: var(--dim); font-weight: normal; margin-left: 6px; }
+.panel .body { padding: 10px 12px; overflow: auto; min-height: 0; }
+#p-header .body, #p-hex .body { max-height: 620px; }
+#p-meta .body, #p-reads .body { max-height: 420px; }
+#p-meta .body.selected { outline: 2px solid var(--sel); outline-offset: -2px; }
+
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+/* .body の padding 分だけ上にずらし、スクロールした行が見出しの上から覗かないようにする */
+thead th { color: var(--dim); font-weight: 500; font-size: 12px; position: sticky; top: -10px; background: var(--panel); z-index: 1; }
+tbody tr[onclick], tr.field, .layout-table tbody tr:not(.gap-row) { cursor: pointer; }
+tbody tr:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+tr.selected, tr.selected:hover { background: color-mix(in srgb, var(--sel) 30%, transparent); }
+
+/* ---- section colors ---- */
+.sec-header { --c: var(--c-header); }
+.sec-rootDirectory { --c: var(--c-root); }
+.sec-metadata { --c: var(--c-metadata); }
+.sec-leafDirectories { --c: var(--c-leaf); }
+.sec-tileData { --c: var(--c-tile); }
+.gap { --c: var(--c-gap); }
+
+.chip { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 4px; font-size: 11px; color: #fff; background: var(--c); }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; background: var(--c); vertical-align: -1px; }
+
+/* ---- file layout ---- */
+.bar-label { display: flex; justify-content: space-between; color: var(--dim); font-size: 11px; margin-top: 8px; font-family: var(--mono); }
+.bar-label span:nth-child(2) { font-family: var(--sans); }
+.bar-wrap { position: relative; }
+.bar { display: flex; height: 34px; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); }
+.seg { flex-basis: 0; min-width: 3px; background: var(--c); color: #fff; font-size: 11px; display: flex; align-items: center; padding: 0 4px; overflow: hidden; white-space: nowrap; cursor: pointer; border-right: 1px solid var(--panel); }
+.seg.gap { background: repeating-linear-gradient(45deg, var(--c-gap) 0 4px, transparent 4px 8px); color: var(--dim); cursor: default; }
+.seg.eof { background: transparent; color: var(--dim); cursor: default; min-width: 0; }
+.seg.selected { box-shadow: inset 0 0 0 3px var(--sel); }
+.seg span { overflow: hidden; text-overflow: ellipsis; }
+.hex-marker { position: absolute; top: -3px; bottom: -3px; border: 2px solid var(--text); border-radius: 3px; pointer-events: none; }
+.first-read { position: relative; margin-top: 4px; font-size: 12px; color: var(--dim); }
+.first-read .bracket { height: 8px; border: 2px solid var(--accent); border-top: 0; border-radius: 0 0 4px 4px; margin-bottom: 2px; }
+.issues { color: var(--error); margin: 8px 0; padding-left: 18px; }
+.layout-table { margin-top: 12px; }
+
+/* ---- header inspector ---- */
+.header-table tr.group th { padding-top: 10px; color: var(--dim); font-size: 11px; font-weight: 600; border-bottom: 0; }
+.header-table .raw { color: var(--dim); white-space: nowrap; font-size: 12px; }
+.header-table .len { color: var(--dim); font-size: 11px; }
+.header-table .value .meaning { margin-left: 8px; color: var(--accent); }
+.field-desc { margin-top: 8px; padding: 8px 10px; border-left: 3px solid var(--sel); background: color-mix(in srgb, var(--sel) 12%, transparent); }
+.counts { margin-top: 12px; padding: 10px; border: 1px dashed var(--line); border-radius: 8px; }
+.counts-title { font-weight: 600; margin-bottom: 6px; }
+.counts-row { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; }
+.counts-row > div:not(.op) { flex: 1 1 120px; display: flex; flex-direction: column; padding: 6px 8px; background: var(--bg); border-radius: 6px; }
+.counts-row b { font-family: var(--mono); font-size: 15px; }
+.counts-row small { font-weight: 600; }
+.counts-row em { font-style: normal; color: var(--dim); font-size: 11px; }
+.counts-row .op { align-self: center; font-size: 18px; color: var(--dim); }
+
+/* ---- hex viewer ---- */
+.hex-head { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-bottom: 6px; }
+.badge { font-size: 11px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line); }
+.badge.first-read { color: var(--accent); border-color: var(--accent); }
+.badge.viewer-inspect { color: var(--c-metadata); border-color: var(--c-metadata); }
+.pager { display: inline-flex; gap: 4px; }
+.hex-scroll { position: relative; max-height: 540px; overflow: auto; font-family: var(--mono); font-size: 12px; line-height: 1.6; }
+.row { display: flex; gap: 14px; white-space: pre; }
+.addr { color: var(--dim); user-select: none; }
+.hex .b { padding: 0 2px; margin-right: 1px; border-radius: 2px; cursor: pointer; background: color-mix(in srgb, var(--c) 16%, transparent); }
+.hex .b.f1 { background: color-mix(in srgb, var(--c) 32%, transparent); }
+.ascii .b { cursor: pointer; background: color-mix(in srgb, var(--c) 12%, transparent); }
+.hex .b.gap, .ascii .b.gap { background: transparent; color: var(--dim); }
+.b.sel { background: var(--sel) !important; color: var(--sel-text); }
+.mid { width: 6px; display: inline-block; }
+
+/* ---- metadata ---- */
+.pipeline { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; margin-bottom: 10px; }
+.pipeline .step { display: flex; flex-direction: column; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); text-align: left; }
+.pipeline .step span { color: var(--dim); font-size: 12px; font-family: var(--mono); }
+.pipeline .arrow { align-self: center; color: var(--dim); }
+.json { font-family: var(--mono); font-size: 12px; }
+.json .children { padding-left: 14px; border-left: 1px solid var(--line); margin-left: 4px; }
+.json summary { cursor: pointer; }
+.json .k { color: var(--dim); }
+.json .k.spec { color: var(--accent); font-weight: 600; }
+.json .v.string { color: var(--c-leaf); word-break: break-all; }
+.json .v.number { color: var(--c-root); }
+
+/* ---- read trace ---- */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.stat { display: flex; flex-direction: column; padding: 8px 10px; background: var(--bg); border-radius: 8px; }
+.stat small { color: var(--dim); }
+.stat b { font-size: 17px; font-family: var(--mono); }
+.stat span { font-size: 11px; }
+.read-table tr.error td { color: var(--error); }

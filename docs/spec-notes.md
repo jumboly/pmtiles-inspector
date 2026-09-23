@@ -65,3 +65,11 @@ Tile Type enum を試すための空アーカイブで、公式 reader は root 
 
 `leaf_z8` の tile の中身は PNG ではなくテキスト（`tile z/x/y` や `ocean`）。header は png を名乗っている。
 Raster Inspector が失敗して Raw Inspector に fallback する例としても使える。
+
+## Phase 1 で分かったこと
+
+- 公式サンプル `terrarium_z9.pmtiles` の metadata には **`encoding` キーが無い**（`name: "terrarium"` のみ）。
+  （spec v3.6 で encoding が追加される前に作られたためと思われる）。Viewer は名前から推測せず、`encoding` が無ければ Terrain とは扱わない。
+  → Terrain mode では「手動で terrarium として解釈する」切り替えが要る可能性がある（Phase 8 で検討）
+- `zcta_z3.pmtiles`（go-pmtiles の extract 出力）は Leaf Directories の長さが 0 で、offset は Tile Data と同じ位置を指す。
+  長さ 0 の section は「位置は持つが中身は無い」ものとして File Layout に出す

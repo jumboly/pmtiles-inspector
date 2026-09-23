@@ -13,6 +13,11 @@ export type ReadPurpose =
   | "metadata"
   | "leaf-directory"
   | "tile-data"
+  /**
+   * Viewer が表示のために読んだもの（Hex Viewer で任意の範囲を見る等）。
+   * PMTiles の仕組み上必要な read と混ぜると「実際に読んだ量」を過大に見せてしまうため区別する。
+   */
+  | "viewer-inspect"
   | "other";
 
 export interface ReadContext {

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PMTiles Internals Viewer</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>PMTiles Internals Viewer</h1>
+      <div id="opener"></div>
+    </header>
+    <main class="grid">
+      <section class="panel" id="p-layout"><h2>File Layout <small>物理配置</small></h2><div class="body"></div></section>
+      <section class="panel" id="p-header"><h2>Header Inspector <small>先頭 127 byte</small></h2><div class="body"></div></section>
+      <section class="panel" id="p-hex"><h2>Hex Viewer <small>生 bytes</small></h2><div class="body"></div></section>
+      <section class="panel" id="p-meta"><h2>Metadata <small>JSON</small></h2><div class="body"></div></section>
+      <section class="panel" id="p-reads"><h2>Read Trace <small>ByteSource への全 read</small></h2><div class="body"></div></section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
