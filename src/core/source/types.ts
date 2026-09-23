@@ -18,6 +18,11 @@ export type ReadPurpose =
    * PMTiles の仕組み上必要な read と混ぜると「実際に読んだ量」を過大に見せてしまうため区別する。
    */
   | "viewer-inspect"
+  /**
+   * Archive Size を知るための HEAD（0 byte）。CORS で Content-Range が読めないときだけ Viewer が送る。
+   * 公式実装には無い request なので、PMTiles に必要な read とは分けて数える。
+   */
+  | "size-probe"
   | "other";
 
 export interface ReadContext {
@@ -27,13 +32,54 @@ export interface ReadContext {
   signal?: AbortSignal;
 }
 
+/** 1 回の HTTP のやり取り。1 つの read が複数回の request になることがある（416 からの取り直し、失敗時の診断） */
+export interface HttpExchange {
+  method: "GET" | "HEAD";
+  /** no-cors は失敗の原因を切り分ける診断 request だけで使う（応答は opaque で中身もヘッダも読めない） */
+  mode: "cors" | "no-cors";
+  /** 送った Range ヘッダ。HEAD では送らない */
+  requestRange?: string;
+  /** opaque 応答（no-cors）では 0 になる */
+  status: number;
+  statusText: string;
+  /**
+   * basic = 同一オリジン（全ヘッダが読める） / cors = 別オリジン（safelisted と Expose されたものしか読めない） /
+   * opaque = no-cors
+   */
+  responseType: ResponseType;
+  /**
+   * 観測対象ヘッダの値。null は「応答に無い」か「CORS で JS に公開されていない」のどちらか。
+   * ブラウザの JS からはこの 2 つを区別できないので、推測で埋めずに null のまま残す。
+   */
+  headers: Record<string, string | null>;
+}
+
 /** HTTP 固有の観測情報。Local の場合は undefined。 */
 export interface HttpReadInfo {
   url: string;
-  requestRange: string;
-  status: number;
-  /** Range 可視化・トラブルシュートに必要なものだけ保持する */
-  headers: Record<string, string>;
+  /** 発生順。最後が read の結果を決めた request */
+  exchanges: HttpExchange[];
+}
+
+/**
+ * read が失敗したときに Source が付けられる観測情報。
+ * TracingByteSource は Source の種類を知らずに、失敗した read にも HTTP のやり取りを残せる。
+ */
+export interface ObservedReadError extends Error {
+  readonly kind?: string;
+  readonly http?: HttpReadInfo;
+}
+
+/**
+ * HEAD で得たサイズの候補。採用するかは呼び出し側が Header と突き合わせて決める
+ * （HEAD には Range が付かないため、サーバが gzip した後の長さを返すことがある）。
+ */
+export interface SizeProbe {
+  contentLength?: number;
+  /** 別オリジンでは公開されていない限り null（圧縮されていないことを確認できない） */
+  contentEncoding: string | null;
+  crossOrigin: boolean;
+  http?: HttpReadInfo;
 }
 
 export interface ReadResult {
@@ -60,4 +106,6 @@ export interface ByteSource {
    * 「全体のうち何 % 読んだか」の表示に使う。
    */
   size(): number | undefined;
+  /** read だけではサイズが分からない Source（CORS 越しの HTTP）が、追加の request でサイズを調べる */
+  probeSize?(ctx?: ReadContext): Promise<SizeProbe>;
 }

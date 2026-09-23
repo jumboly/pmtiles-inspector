@@ -1,12 +1,14 @@
 import { PmtilesArchive, type DirectoryRecord, type TileLookup, type TileRead } from "../core/pmtiles/archive";
 import { HEADER_LAYOUT, type HeaderKey, type SectionName } from "../core/pmtiles/header";
 import { computeLayout } from "../core/pmtiles/layout";
+import { HttpRangeSource } from "../core/source/http-range-source";
 import { LocalFileSource } from "../core/source/local-file-source";
 import { TracingByteSource } from "../core/source/tracing-byte-source";
 import type { ByteSource } from "../core/source/types";
 import { isPlainDirectory } from "./directory-util";
 import { buildTraceSteps, isPhysicalStep } from "./trace-steps";
-import type { AppState, DirColumn, DirView, HexWindow } from "./state";
+import { sizeBytes, sizeFromProbe, type ArchiveSize } from "./archive-size";
+import type { AppState, DirColumn, DirView, HexWindow, SourceDesc } from "./state";
 import type { Store } from "./store";
 
 /** Hex Viewer が 1 度に読む量。巨大 section を開いても全体を読まないための上限 */
@@ -37,17 +39,34 @@ export class Controller {
   constructor(private readonly store: Store<AppState>) {}
 
   openFile(file: Blob, name: string) {
-    return this.open(new LocalFileSource(file, name));
+    return this.open(new LocalFileSource(file, name), { kind: "local", name });
   }
 
-  async open(inner: ByteSource) {
+  /** URL の archive を HTTP Range Request で開く。LocalFileSource と同じ ByteSource の口に差し替えるだけで、parser は変わらない */
+  openUrl(url: string) {
+    let inner: HttpRangeSource;
+    try {
+      inner = new HttpRangeSource(url);
+    } catch (e) {
+      ++this.openSeq;
+      this.store.set({ status: "error", error: message(e), errorKind: kindOf(e), sourceDesc: { kind: "http", url } });
+      return Promise.resolve();
+    }
+    return this.open(inner, { kind: "http", url: inner.url });
+  }
+
+  async open(inner: ByteSource, sourceDesc: SourceDesc) {
     const seq = ++this.openSeq;
     this.stopTrace();
     const source = new TracingByteSource(inner);
     this.store.set({
       status: "loading",
       error: undefined,
+      errorKind: undefined,
+      sourceDesc,
       source,
+      archiveSize: undefined,
+      sizeProbing: undefined,
       archive: undefined,
       layout: undefined,
       metadata: undefined,
@@ -70,11 +89,13 @@ export class Controller {
     try {
       const archive = await PmtilesArchive.open(source);
       if (seq !== this.openSeq) return;
-      const layout = computeLayout(archive.header, source.size());
+      const archiveSize = knownSize(inner);
       this.store.set({
         status: "ready",
         archive,
-        layout,
+        archiveSize,
+        sizeProbing: archiveSize.origin === "unknown" && source.canProbeSize,
+        layout: computeLayout(archive.header, sizeBytes(archiveSize)),
         hex: { baseOffset: 0, bytes: archive.firstRead.bytes, origin: "first-read" },
         // root は先頭 16 KiB に含まれていて読み終わっているので、開いた時点で見せる（追加 I/O なし）
         dirView: { dir: archive.root, trail: [], page: 0 },
@@ -82,8 +103,21 @@ export class Controller {
         ...hilbertZoomPatch(Math.min(archive.header.maxZoom, HILBERT_MAX_WINDOW_ZOOM)),
       });
     } catch (e) {
-      if (seq === this.openSeq) this.store.set({ status: "error", error: message(e) });
+      if (seq === this.openSeq) this.store.set({ status: "error", error: message(e), errorKind: kindOf(e) });
       return;
+    }
+
+    // CORS で Content-Range が読めなかったときだけ HEAD でサイズを調べる（Viewer が「読んだ割合」を出すため。公式は送らない）
+    if (this.store.get().sizeProbing) {
+      const archive = this.store.get().archive!;
+      let archiveSize: ArchiveSize;
+      try {
+        archiveSize = sizeFromProbe(archive.header, await source.probeSize({ label: "Archive Size を調べる" }));
+      } catch (e) {
+        archiveSize = { origin: "unknown", reason: `HEAD に失敗しました: ${message(e)}` };
+      }
+      if (seq !== this.openSeq) return;
+      this.store.set({ archiveSize, sizeProbing: false, layout: computeLayout(archive.header, sizeBytes(archiveSize)) });
     }
 
     // Metadata は tile 取得には不要だが、Phase 1 の教材として開いた時点で読む（READ として記録される）
@@ -404,6 +438,21 @@ export function entryAtByte(dir: DirectoryRecord, pos: number): { index: number;
     }
   }
   return undefined;
+}
+
+/** read の時点で分かっている Archive Size。HTTP で分からなければ理由を付けて unknown にする */
+function knownSize(inner: ByteSource): ArchiveSize {
+  const n = inner.size();
+  if (inner instanceof HttpRangeSource) {
+    if (n !== undefined && inner.sizeOrigin) return { origin: inner.sizeOrigin, bytes: n };
+    return { origin: "unknown", reason: "応答の Content-Range を JS から読めませんでした（CORS の Access-Control-Expose-Headers に含まれていない）" };
+  }
+  return n !== undefined ? { origin: "file", bytes: n } : { origin: "unknown", reason: "Source がサイズを返しませんでした" };
+}
+
+function kindOf(e: unknown): string | undefined {
+  const k = (e as { kind?: unknown } | undefined)?.kind;
+  return typeof k === "string" ? k : undefined;
 }
 
 function message(e: unknown): string {

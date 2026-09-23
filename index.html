@@ -10,6 +10,7 @@
       <h1>PMTiles Internals Viewer</h1>
       <div id="opener"></div>
     </header>
+    <div id="open-error" class="open-error" hidden></div>
     <main class="grid">
       <section class="panel" id="p-layout"><h2>File Layout <small>物理配置</small></h2><div class="body"></div></section>
       <section class="panel" id="p-trace"><h2>Tile Trace <small>z/x/y → TileID → Root / Leaf → Tile Entry → Range Read → Payload</small></h2><div class="body"></div></section>
@@ -55,6 +56,12 @@
           <dd>
             <a href="https://github.com/protomaps/PMTiles">protomaps/PMTiles</a> の <code>js/test/data</code> より。
             MLT fixture の metadata には © OpenStreetMap contributors / © Overture Maps Foundation の帰属表示が含まれる。
+          </dd>
+          <dt>リモート: Terrarium PNG 全球 / Overture POI（Protomaps のサンプル）</dt>
+          <dd>
+            同梱ではなく <code>r2-public.protomaps.com</code> から HTTP Range Request で読む。
+            Terrarium は上記と同じ Terrain Tiles（帰属表示は上記のとおり）。
+            Overture POI は <a href="https://overturemaps.org/">Overture Maps Foundation</a> の Places データ。
           </dd>
           <dt>Leaf あり (合成)</dt>
           <dd>このリポジトリの <code>scripts/</code> で生成した合成データ。</dd>

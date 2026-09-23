@@ -2,6 +2,10 @@ import type { DirectoryRecord, MetadataRecord, PmtilesArchive, TileLookup, TileR
 import type { HeaderKey, SectionName } from "../core/pmtiles/header";
 import type { FileLayout } from "../core/pmtiles/layout";
 import type { ReadRecord, TracingByteSource } from "../core/source/tracing-byte-source";
+import type { ArchiveSize } from "./archive-size";
+
+/** 何を開いているか。Local と HTTP で「同じ archive をどう読んだか」を見比べられるよう区別して持つ */
+export type SourceDesc = { kind: "local"; name: string } | { kind: "http"; url: string };
 
 /** 何が選ばれているか。パネル間連動はすべてこの値の変化で起こる */
 export type Selection =
@@ -60,7 +64,14 @@ export interface TraceView {
 export interface AppState {
   status: "idle" | "loading" | "ready" | "error";
   error?: string;
+  /** 失敗の種類（HTTP なら cors / network / range-not-supported など）。種類ごとに説明と確認方法を出し分ける */
+  errorKind?: string;
+  sourceDesc?: SourceDesc;
   source?: TracingByteSource;
+  /** 「読んだ割合」の分母。HTTP では開いた後で分かる（または分からない）ので source.size() とは別に持つ */
+  archiveSize?: ArchiveSize;
+  /** HEAD でサイズを調べている最中 */
+  sizeProbing?: boolean;
   archive?: PmtilesArchive;
   layout?: FileLayout;
   metadata?: MetadataRecord;

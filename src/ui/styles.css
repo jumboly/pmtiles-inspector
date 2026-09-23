@@ -219,7 +219,7 @@ tr.selected, tr.selected:hover { background: color-mix(in srgb, var(--sel) 30%, 
 .p-metadata { --c: var(--c-metadata); }
 .p-leaf-directory { --c: var(--c-leaf); }
 .p-tile-data { --c: var(--c-target); }
-.p-viewer-inspect, .p-other { --c: var(--c-gap); }
+.p-viewer-inspect, .p-size-probe, .p-other { --c: var(--c-gap); }
 .read-track { position: relative; height: 10px; margin-top: 3px; background: var(--bg); border-radius: 3px; }
 .read-mark { position: absolute; top: 0; bottom: 0; background: var(--c); opacity: 0.3; border-radius: 2px; }
 .read-mark.in-trace { opacity: 1; outline: 1px solid var(--text); z-index: 1; }
@@ -375,3 +375,20 @@ tr.selected, tr.selected:hover { background: color-mix(in srgb, var(--sel) 30%, 
 .judge .rule { padding: 4px 8px; border-radius: 6px; color: var(--dim); border: 1px solid var(--line); }
 .judge .rule.on { color: var(--text); border-color: var(--sel); background: color-mix(in srgb, var(--sel) 18%, transparent); }
 .judge .verdict { font-weight: 700; }
+
+/* Phase 5: Remote PMTiles */
+.url-form { display: flex; gap: 4px; }
+.url-input { font-size: 12px; width: min(42ch, 60vw); padding: 4px 8px; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.open-error { margin: 10px 16px 0; padding: 10px 14px; border: 1px solid var(--error); border-radius: 8px; background: var(--panel); }
+.open-error b { color: var(--error); }
+.open-error p, .open-error ul { margin: 6px 0; }
+.open-error pre, .http-box pre { margin: 4px 0; padding: 6px 8px; background: var(--bg); border-radius: 6px; font-size: 12px; overflow-x: auto; white-space: pre; }
+.read-table tr.clickable { cursor: pointer; }
+.read-table tr.clickable:hover td { background: var(--bg); }
+.read-table tr.http-detail td { background: var(--bg); padding: 6px 10px 10px; }
+.http-box { display: flex; flex-direction: column; gap: 6px; max-width: 100%; overflow-x: auto; }
+.http-box pre { background: var(--panel); }
+.exchange { display: flex; flex-direction: column; gap: 2px; }
+.header-table { width: auto; font-size: 12px; }
+.header-table td { padding: 1px 12px 1px 0; border: none; }
+.http-line { margin: 6px 0; padding: 6px 8px; background: var(--bg); border-radius: 6px; font-size: 12px; overflow-x: auto; }

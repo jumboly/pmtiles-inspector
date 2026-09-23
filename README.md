@@ -6,6 +6,12 @@ Header・File Layout・Root / Leaf Directory・Directory Encoding（列指向 / 
 Tile Trace では z/x/y → Hilbert position → TileID → Root / Leaf の binary search → Tile Entry → Range Read → Tile Decompression → Tile Payload を 1 段ずつ追えます。
 読んだ範囲は File Layout 上に、1 タイルのために読んだ量の内訳は Tile Trace に表示されます。
 
+ローカルファイル（`Blob.slice`）のほか、URL の archive を HTTP Range Request で開けます。
+Read Trace では各 read の request（Range ヘッダ）と response（status・ヘッダ・CORS で読めなかったヘッダ）を確認でき、
+CORS / Range 非対応 / mixed content などで開けなかった場合は原因と確認方法を表示します。
+`?url=<archive の URL>` を付けたリンクで、開く archive を指定できます
+（例: [Terrarium 全球 28.4 GiB](https://www.jumboly.jp/pmtiles-inspector/?url=https%3A%2F%2Fr2-public.protomaps.com%2Fprotomaps-sample-datasets%2Fterrarium_z9.pmtiles)）。
+
 公開版: https://www.jumboly.jp/pmtiles-inspector/
 
 ## 開発
@@ -31,6 +37,9 @@ main に push すると GitHub Actions がテスト・ビルドを行い、GitHu
 | `zcta_z3.pmtiles` | U.S. Census Bureau, 2018 Cartographic Boundary Files（`cb_2018_us_zcta510_500k`）を元にした Protomaps のサンプルの z0-3 を切り出したもの |
 | `test_fixture_*.pmtiles`, `invalid*.pmtiles` | [protomaps/PMTiles](https://github.com/protomaps/PMTiles) の `js/test/data` より。`test_fixture_mlt` の metadata には © OpenStreetMap contributors / © Overture Maps Foundation の帰属表示が含まれる |
 | `leaf_z8.pmtiles`, `leaf_z8_nocomp.pmtiles` | `scripts/` で生成した合成データ |
+
+リモートのサンプル（`r2-public.protomaps.com` の `terrarium_z9.pmtiles` / `overture-pois.pmtiles`）は同梱せず、
+画面から HTTP Range Request で読みます。Terrarium は上記と同じ Terrain Tiles、Overture POI は Overture Maps Foundation の Places データです。
 
 ### Terrain Tiles の帰属表示
 

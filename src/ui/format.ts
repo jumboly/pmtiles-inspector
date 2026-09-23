@@ -37,7 +37,8 @@ export function percent(ratio: number): string {
   // 99.95% 以上を "100.0 %" と丸めると「全部」に見えてしまうので、100% 未満であることを残す
   if (p >= 99.95 && p < 100) return "> 99.9 %";
   if (p >= 1) return `${p.toFixed(1)} %`;
-  return `${p.toPrecision(3)} %`;
+  // toPrecision は 1e-7 未満で指数表記になり「どれだけ小さいか」が直感で読めないので、有効 3 桁の小数で書く
+  return `${p.toFixed(-Math.floor(Math.log10(p)) + 2)} %`;
 }
 
 /** 閉区間 [start, end] 表記。HTTP Range ヘッダと同じく end を含む */

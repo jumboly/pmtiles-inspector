@@ -47,3 +47,11 @@ export function computeLayout(h: Header, fileSize?: number): FileLayout {
   }
   return { segments, fileSize, issues };
 }
+
+/**
+ * Header の宣言から言える「ファイルは少なくともこの長さのはず」。
+ * 外から得たサイズ（HEAD の Content-Length など）が本当に元のファイルの長さかを確かめる下限として使う。
+ */
+export function minimumArchiveSize(h: Header): number {
+  return Math.max(...sectionsOf(h).map((s) => s.offset + s.length));
+}

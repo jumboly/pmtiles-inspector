@@ -1,4 +1,4 @@
-import type { ByteSource, ReadContext, ReadPurpose, ReadResult, HttpReadInfo } from "./types";
+import type { ByteSource, HttpReadInfo, ObservedReadError, ReadContext, ReadPurpose, ReadResult, SizeProbe } from "./types";
 
 export interface ReadRecord {
   /** 1 始まりの通し番号。UI 上の "READ #n" に対応する。 */
@@ -13,6 +13,8 @@ export interface ReadRecord {
   durationMs: number;
   http?: HttpReadInfo;
   error?: string;
+  /** Source が付けた失敗の種類（HTTP なら cors / network / range-not-supported など） */
+  errorKind?: string;
 }
 
 type Listener = (record: ReadRecord) => void;
@@ -69,14 +71,40 @@ export class TracingByteSource implements ByteSource {
       });
       return { ...result, readId: id };
     } catch (e) {
-      this.push({
-        ...base,
-        receivedLength: 0,
-        durationMs: now() - startedAt,
-        error: e instanceof Error ? e.message : String(e),
-      });
+      this.pushError(base, e);
       throw e;
     }
+  }
+
+  /** HEAD によるサイズ調査も read と同じ列に記録する。「Viewer が何を送ったか」を 1 か所で見せるため */
+  get canProbeSize(): boolean {
+    return this.inner.probeSize !== undefined;
+  }
+
+  async probeSize(ctx?: ReadContext): Promise<SizeProbe> {
+    if (!this.inner.probeSize) throw new Error("この Source はサイズを調べられません");
+    const startedAt = now();
+    const base = { id: this.nextId++, offset: 0, requestedLength: 0, purpose: "size-probe", label: ctx?.label, startedAt } as const;
+    try {
+      const probe = await this.inner.probeSize(ctx);
+      this.push({ ...base, receivedLength: 0, durationMs: now() - startedAt, http: probe.http });
+      return probe;
+    } catch (e) {
+      this.pushError(base, e);
+      throw e;
+    }
+  }
+
+  private pushError(base: Omit<ReadRecord, "receivedLength" | "durationMs">, e: unknown) {
+    const obs = e as Partial<ObservedReadError>;
+    this.push({
+      ...base,
+      receivedLength: 0,
+      durationMs: now() - base.startedAt,
+      error: e instanceof Error ? e.message : String(e),
+      errorKind: obs?.kind,
+      http: obs?.http,
+    });
   }
 
   private push(record: ReadRecord) {

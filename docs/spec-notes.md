@@ -50,7 +50,7 @@ Tile Type enum を試すための空アーカイブで、公式 reader は root 
 - 公式 FetchSource は常に `bytes=0-16383` を要求し、16 KiB 未満のアーカイブで 416 が返ったら全長で取り直す
 - サンプルサーバ (r2-public.protomaps.com) の CORS 設定は **`Access-Control-Expose-Headers: ETag` だけ**。
   ブラウザからは `Content-Range` を読めないので、アーカイブ全長が分からない。
-  → 全長を知るには `Content-Length` を読める HEAD（または 0 byte の Range）が別に必要。
+  → 全長を知るには `Content-Length` を読める HEAD が別に必要（Phase 5 で対応。下記参照）。
   取れなければ UI では「不明」と表示する
 - Node 25 の DecompressionStream は brotli に対応、zstd には非対応
 
@@ -127,3 +127,37 @@ Raster Inspector が失敗して Raw Inspector に fallback する例として�
 - 1 タイルに必要な量（cold）の例: `leaf_z8` の z8 タイルは 16,384（先頭 16 KiB）+ 95（leaf）+ 14（tile）= 16,493 byte。
   小さい archive では先頭 16 KiB が大半を占める。`zcta_z3` の z3 タイルは 1 つで 494 KB（archive の 18%）あり、
   「ごく一部しか読まない」が目に見えるのは大きな archive を扱う Phase 5 から
+
+## Phase 5 で分かったこと
+
+- **公式 FetchSource（pmtiles@4.5.0）の要点**: 送るヘッダは `Range` だけ（`If-Match` は preflight が要るので送らない）。
+  先頭 read の 416 は `Content-Range: bytes */size` を見て全長で取り直す。200 で `Content-Length` が要求より大きければ
+  Byte Serving 非対応として中断。ETag が変わったら `cache: "reload"` で読み直す。
+  本実装は ETag の変化で**止める**（読み直すと既に読んだ directory と新しいファイルが混ざった Trace になるため）
+- **単一範囲の `Range` は CORS safelisted request header**（`bytes=N-M` の形に限る）なので preflight が起きない。
+  pmtiles.io（GitHub Pages）は OPTIONS に 405 を返すが、ブラウザからは読める
+- **CORS で見えるヘッダ**: 別オリジンでは safelisted（`Content-Length` / `Content-Type` / `Cache-Control` など）と
+  `Access-Control-Expose-Headers` のものしか JS から読めない。実測（2026-09-23）:
+
+  | ホスト | Expose-Headers | 別オリジンから Content-Range |
+  |---|---|---|
+  | `r2-public.protomaps.com` | `ETag` | 読めない |
+  | GitHub Pages（pmtiles.io・本サイト） | なし | 読めない（同一オリジンの本サイトからは読める） |
+
+  206 には Content-Range が必ず付く（RFC 9110）ので、206 なのに null なら「CORS で隠されている」と言い切れる
+- **Archive Size の補い方**: Content-Range が読めないときだけ HEAD を送り、Content-Length（safelisted）を使う。
+  Read Trace には `size-probe`（0 byte）として別枠で残し、「PMTiles として読んだ量」には数えない
+- **HEAD の Content-Length は圧縮後の長さのことがある**: ブラウザは Fetch 仕様に従い、`Range` 付きの request にだけ
+  `Accept-Encoding: identity` を付ける。HEAD には付かないので、GitHub Pages は gzip 後の長さ
+  （`leaf_z8`: 実物 588,612 B → HEAD 74,037 B）を返す。別オリジンでは Content-Encoding も読めないので、
+  **Header の section の終端より短い HEAD 長は捨てる**（`minimumArchiveSize`）。
+  長い場合も別オリジンでは「無圧縮であることは未確認」と表示する
+- 同じ理由で、GitHub Pages に `Accept-Encoding: gzip` 付きで Range を送ると、gzip 後のストリームに対する Range が返る
+  （`Content-Range: bytes */74037`）。ブラウザは identity を付けるので実害は無いが、curl で試すときは注意
+- **fetch の失敗理由**: ブラウザは CORS 拒否もネットワーク断も `TypeError: Failed to fetch` にする。
+  失敗後に `mode: "no-cors"` の HEAD を 1 回送り、opaque 応答が返れば「サーバには届くが CORS で拒否」、
+  それも失敗すれば「接続できない」と切り分ける。https のページから http の URL（localhost を除く）は mixed content として先に判定する
+- 大きな archive での実測（cold, 1 タイル）:
+  - `terrarium_z9`（28.4 GiB）の z0: 16,384（先頭）+ 10,082（leaf）+ 106,274（tile）byte。metadata 681 byte を含めて約 133 KB = 0.00044 %
+  - `overture-pois`（4.34 GiB）の z14 中心タイル: 16,384 + 7,948（leaf）+ 387,205（tile）byte
+  - Local と HTTP で read の並び（offset / length / 目的）は完全に同じ（テストで確認）。違うのは HTTP の観測情報だけ

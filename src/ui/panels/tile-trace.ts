@@ -4,6 +4,7 @@ import { MAX_ZOOM, tileIdToZxy } from "../../core/pmtiles/tileid";
 import type { Controller } from "../controller";
 import { h, replaceChildren } from "../dom";
 import { num, percent, rangeText, size } from "../format";
+import { sizeBytes } from "../archive-size";
 import type { AppState, TraceView } from "../state";
 import type { Store } from "../store";
 import { traceBudget } from "../trace-reads";
@@ -49,7 +50,7 @@ export function mountTileTrace(el: HTMLElement, store: Store<AppState>, ctl: Con
   );
 
   store.subscribe((s, prev) => {
-    if (s.archive !== prev.archive || s.trace !== prev.trace || s.traceLoading !== prev.traceLoading || s.traceError !== prev.traceError || s.tracePlaying !== prev.tracePlaying) render(s);
+    if (s.archive !== prev.archive || s.trace !== prev.trace || s.traceLoading !== prev.traceLoading || s.traceError !== prev.traceError || s.tracePlaying !== prev.tracePlaying || s.archiveSize !== prev.archiveSize) render(s);
   });
 
   function render(s: AppState) {
@@ -69,13 +70,23 @@ export function mountTileTrace(el: HTMLElement, store: Store<AppState>, ctl: Con
       view,
       s.traceLoading ? h("p", { class: "note" }, s.traceLoading) : null,
       s.traceError ? h("p", { class: "error" }, s.traceError) : null,
-      t ? traceView(s.archive, t, !!s.tracePlaying, ctl) : h("p", { class: "note" }, "Hilbert Viewer のマスをクリックしても始められます。"),
+      t ? traceView(s.archive, t, !!s.tracePlaying, ctl, readCtx(s)) : h("p", { class: "note" }, "Hilbert Viewer のマスをクリックしても始められます。"),
     );
     if (!el.contains(form)) replaceChildren(el, form, view);
   }
 }
 
-function traceView(archive: PmtilesArchive, t: TraceView, playing: boolean, ctl: Controller) {
+/** Physical Read の段の説明に使う「どう読んだか」。Archive Size と、HTTP なら実際の request */
+interface ReadCtx {
+  total: number | undefined;
+  reads: AppState["reads"];
+}
+
+function readCtx(s: AppState): ReadCtx {
+  return { total: sizeBytes(s.archiveSize), reads: s.reads };
+}
+
+function traceView(archive: PmtilesArchive, t: TraceView, playing: boolean, ctl: Controller, rc: ReadCtx) {
   const { lookup, step: current } = t;
   const steps = buildTraceSteps(lookup);
   const last = steps.length - 1;
@@ -107,7 +118,7 @@ function traceView(archive: PmtilesArchive, t: TraceView, playing: boolean, ctl:
         ),
       ),
     ),
-    stepDetail(archive, steps[current]!, t),
+    stepDetail(archive, steps[current]!, t, rc),
   );
 }
 
@@ -152,7 +163,7 @@ const OUTCOME_SHORT = {
 
 const RESULT_SHORT = { "not-found": "タイル無し", "out-of-zoom": "ズーム範囲外", error: "エラー" } as const;
 
-function stepDetail(archive: PmtilesArchive, s: UiTraceStep, t: TraceView) {
+function stepDetail(archive: PmtilesArchive, s: UiTraceStep, t: TraceView, rc: ReadCtx) {
   const { lookup, tile } = t;
   const a = lookup.address;
   const hd = archive.header;
@@ -248,7 +259,8 @@ function stepDetail(archive: PmtilesArchive, s: UiTraceStep, t: TraceView) {
           {},
           `ローカルファイルなら File.slice(${num(tile.fileOffset)}, ${num(tile.fileOffset + tile.length)})、HTTP なら「Range: bytes=${tile.fileOffset}-${tile.fileOffset + tile.length - 1}」のリクエスト 1 回に相当する。ファイルの他の部分には触れない。`,
         ),
-        budgetTable(archive, t, tile),
+        httpLine(rc.reads.find((r) => r.id === tile.readId)),
+        budgetTable(archive, t, tile, rc.total),
         h("p", { class: "dim" }, "ここで得たのはファイル上の bytes そのもの（Tile Compression 適用後）。File Layout / Hex Viewer / Read Trace がこの read を示している。"),
       );
     }
@@ -283,7 +295,7 @@ function stepDetail(archive: PmtilesArchive, s: UiTraceStep, t: TraceView) {
         "Tile Payload: PMTiles の役目はここまで",
         io(tile.payload ? "解凍後の bytes" : "解凍できなかったので raw bytes", `${num(bytes.length)} byte · 先頭から推定: ${sn.kind}`),
         h("p", {}, `推定の根拠: ${sn.reason}。Header の宣言と中身の比較は Tile Payload パネルで確認できる。`),
-        budgetTable(archive, t, tile),
+        budgetTable(archive, t, tile, rc.total),
         h("p", { class: "dim" }, "この bytes を MVT / Raster などの Content Inspector に渡す。Content Inspector は bytes だけを受け取り、PMTiles の offset や directory は知らない。"),
       );
     }
@@ -291,11 +303,10 @@ function stepDetail(archive: PmtilesArchive, s: UiTraceStep, t: TraceView) {
 }
 
 /** 1 タイルのために読んだ量の内訳。巨大なファイルのごく一部しか読んでいないことを数字で見せる */
-function budgetTable(archive: PmtilesArchive, t: TraceView, tile: TileRead) {
+function budgetTable(archive: PmtilesArchive, t: TraceView, tile: TileRead, total: number | undefined) {
   const rows = traceBudget(archive, t, tile);
   const cold = rows.reduce((a, r) => a + r.bytes, 0);
   const fresh = rows.filter((r) => r.how === "read").reduce((a, r) => a + r.bytes, 0);
-  const total = archive.source.size();
   const HOW = { open: "archive を開いたときの read を共有", read: "この Trace で読んだ", cache: "以前の read を再利用（今回 0 byte）" } as const;
   return h(
     "table",
@@ -308,6 +319,18 @@ function budgetTable(archive: PmtilesArchive, t: TraceView, tile: TileRead) {
       h("tr", { class: "sum" }, h("td", {}, "合計（何も持っていない状態から 1 タイル取る場合）"), h("td", {}), h("td", { class: "mono" }, num(cold)), h("td", { class: "dim" }, total ? `archive 全体 ${size(total)} の ${percent(cold / total)}` : "")),
       h("tr", { class: "sum" }, h("td", {}, "この Trace で新たに発生した I/O"), h("td", {}), h("td", { class: "mono" }, num(fresh)), h("td", {})),
     ),
+  );
+}
+
+/** HTTP で開いている場合は、実際に送った request と受けた response を 1 行で見せる（詳細は Read Trace） */
+function httpLine(rec: AppState["reads"][number] | undefined) {
+  const ex = rec?.http?.exchanges.at(-1);
+  if (!ex) return null;
+  const cr = ex.headers["content-range"];
+  return h(
+    "pre",
+    { class: "mono http-line" },
+    `${ex.method} ${rec!.http!.url}\nRange: ${ex.requestRange}\n→ ${ex.status} ${ex.statusText}${cr ? `\nContent-Range: ${cr}` : ex.responseType === "cors" ? "\nContent-Range: （CORS で Expose されておらず JS からは読めない）" : ""}`,
   );
 }
 

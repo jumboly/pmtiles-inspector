@@ -8,5 +8,6 @@ export const PURPOSE_LABEL: Record<ReadPurpose, string> = {
   "leaf-directory": "Leaf Directory",
   "tile-data": "Tile Data",
   "viewer-inspect": "Viewer 表示用",
+  "size-probe": "サイズ調査 (HEAD)",
   other: "その他",
 };
