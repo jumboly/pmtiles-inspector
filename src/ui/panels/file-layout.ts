@@ -7,6 +7,9 @@ import { h, replaceChildren } from "../dom";
 import { hexOffset, num, percent, rangeText, size } from "../format";
 import type { AppState } from "../state";
 import type { Store } from "../store";
+import type { ReadRecord } from "../../core/source/tracing-byte-source";
+import { traceReadIds } from "../trace-reads";
+import { PURPOSE_LABEL } from "../text/read-purpose";
 import { FIELD_INFO, SECTION_LABEL } from "../text/header-fields";
 
 const ISSUE_TEXT = {
@@ -23,7 +26,7 @@ const ISSUE_TEXT = {
  */
 export function mountFileLayout(el: HTMLElement, store: Store<AppState>, ctl: Controller) {
   store.subscribe((s, prev) => {
-    if (s.layout !== prev.layout || s.selection !== prev.selection || s.hex !== prev.hex) render(s);
+    if (s.layout !== prev.layout || s.selection !== prev.selection || s.hex !== prev.hex || s.reads !== prev.reads || s.trace !== prev.trace) render(s);
   });
 
   function render(s: AppState) {
@@ -71,7 +74,12 @@ export function mountFileLayout(el: HTMLElement, store: Store<AppState>, ctl: Co
 
     // 選択中の entry が指す先（Tile Data または Leaf Directory）。Offset / Length が「どこを指すか」を物理位置で見せる
     const sel = s.selection;
-    const target = sel?.kind === "dir-entry" ? entryTarget(sel.dir.decoded.entries[sel.index]!, h0) : undefined;
+    const target =
+      sel?.kind === "dir-entry"
+        ? entryTarget(sel.dir.decoded.entries[sel.index]!, h0)
+        : sel?.kind === "tile-data"
+          ? { section: "tileData" as const, offset: sel.offset, length: sel.length }
+          : undefined;
     const targetMarker = (total: number, clip?: number) => {
       if (!target) return null;
       const end = Math.min(target.offset + target.length, clip ?? Infinity);
@@ -83,11 +91,30 @@ export function mountFileLayout(el: HTMLElement, store: Store<AppState>, ctl: Co
       });
     };
 
+    // Read Trace の全 read を帯の下のトラックに並べる。今の Trace（今の段まで）で使った read だけ濃く描く
+    const inTrace = traceReadIds(s.trace);
+    const reads = s.reads.filter((r) => !r.error && r.receivedLength > 0);
+    const readTrack = (total: number, clip?: number) =>
+      h(
+        "div",
+        { class: "read-track" },
+        reads.map((r) => {
+          const end = Math.min(r.offset + r.receivedLength, clip ?? Infinity);
+          if (end <= r.offset) return null;
+          return h("div", {
+            class: `read-mark p-${r.purpose}${inTrace.has(r.id) ? " in-trace" : ""}`,
+            style: `left:${(r.offset / total) * 100}%;width:max(3px, ${((end - r.offset) / total) * 100}%)`,
+            title: `READ #${r.id} ${PURPOSE_LABEL[r.purpose]}${r.label ? ` (${r.label})` : ""}\n${rangeText(r.offset, r.receivedLength)}（${size(r.receivedLength)}）`,
+          });
+        }),
+      );
+
     const zoomTotal = FIRST_READ_SIZE;
     replaceChildren(
       el,
       h("div", { class: "bar-label" }, h("span", {}, "0"), h("span", {}, `ファイル全体（実寸） ${size(fileSize)}`), h("span", {}, `EOF ${num(fileSize)}`)),
       h("div", { class: "bar-wrap" }, h("div", { class: "bar" }, layout.segments.map((seg) => segEl(seg, fileSize))), hexMarker(fileSize), targetMarker(fileSize)),
+      readTrack(fileSize),
       h(
         "div",
         { class: "bar-label" },
@@ -102,6 +129,7 @@ export function mountFileLayout(el: HTMLElement, store: Store<AppState>, ctl: Co
         hexMarker(zoomTotal, zoomTotal),
         targetMarker(zoomTotal, zoomTotal),
       ),
+      readTrack(zoomTotal, zoomTotal),
 
       h(
         "div",
@@ -119,13 +147,30 @@ export function mountFileLayout(el: HTMLElement, store: Store<AppState>, ctl: Co
             "p",
             { class: "target-note" },
             h("span", { class: "target-swatch" }),
-            `選択中の entry → ${SECTION_LABEL[target.section]} 内 bytes ${rangeText(target.offset, target.length)}（${size(target.length)}）`,
+            `${sel?.kind === "tile-data" ? "Range Read で読んだ tile" : "選択中の entry"} → ${SECTION_LABEL[target.section]} 内 bytes ${rangeText(target.offset, target.length)}（${size(target.length)}）`,
           )
         : null,
+      reads.length ? readLegend(reads, inTrace, !!s.trace) : null,
       layout.issues.length ? h("ul", { class: "issues" }, layout.issues.map((i) => h("li", {}, `${ISSUE_TEXT[i.code]}: ${i.sections.map((n) => SECTION_LABEL[n]).join(", ")}`))) : null,
       sectionTable(layout.segments, fileSize, h0, selName, ctl),
     );
   }
+}
+
+/** read トラックの凡例。実際に現れた目的だけを出す（凡例が長くなりすぎないように） */
+function readLegend(reads: ReadRecord[], inTrace: Set<number>, tracing: boolean) {
+  const purposes = [...new Set(reads.map((r) => r.purpose))];
+  const traced = reads.filter((r) => inTrace.has(r.id));
+  const tracedBytes = traced.reduce((a, r) => a + r.receivedLength, 0);
+  return h(
+    "div",
+    { class: "read-legend" },
+    h("span", { class: "dim" }, "帯の下のトラック = 実際に read した範囲:"),
+    purposes.map((p) => h("span", {}, h("span", { class: `read-swatch p-${p}` }), PURPOSE_LABEL[p])),
+    tracing
+      ? h("span", { class: "dim" }, `濃い印 = 今の Trace の今の段までに使った read（${traced.length} 回, 計 ${size(tracedBytes)}）。薄い印 = それ以外の read`)
+      : null,
+  );
 }
 
 function sectionTable(segments: LayoutSegment[], fileSize: number, header: Header, selName: SectionName | undefined, ctl: Controller) {
@@ -167,6 +212,7 @@ function selectedSection(s: AppState): SectionName | undefined {
   if (sel?.kind === "section") return sel.name;
   // directory（や entry）を選んでいる間は、その directory 自身が置かれている section を光らせる
   if (sel?.kind === "directory" || sel?.kind === "dir-entry") return sel.dir.kind === "root" ? "rootDirectory" : "leafDirectories";
+  if (sel?.kind === "tile-data") return "tileData";
   if (sel?.kind === "header-field") {
     // offset/length 系の field を選んだら、その field が指す section を光らせる
     // それ以外の field は Header 自身の一部なので Header を光らせる

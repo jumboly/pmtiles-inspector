@@ -10,6 +10,7 @@ import { mountMetadataViewer } from "./ui/panels/metadata-viewer";
 import { mountOpener } from "./ui/panels/opener";
 import { mountReadLog } from "./ui/panels/read-log";
 import { mountSearchViewer } from "./ui/panels/search-viewer";
+import { mountTilePayload } from "./ui/panels/tile-payload";
 import { mountTileTrace } from "./ui/panels/tile-trace";
 import { initialState, type AppState } from "./ui/state";
 import { createStore } from "./ui/store";
@@ -21,6 +22,7 @@ const body = (id: string) => document.querySelector<HTMLElement>(`#${id} .body`)
 mountOpener(document.getElementById("opener")!, store, ctl);
 mountFileLayout(body("p-layout"), store, ctl);
 mountTileTrace(body("p-trace"), store, ctl);
+mountTilePayload(body("p-payload"), store, ctl);
 mountHilbertViewer(body("p-hilbert"), store, ctl);
 mountSearchViewer(body("p-search"), store, ctl);
 mountHeaderInspector(body("p-header"), store, ctl);

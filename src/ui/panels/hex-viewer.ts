@@ -104,6 +104,7 @@ export function mountHexViewer(el: HTMLElement, store: Store<AppState>, ctl: Con
         h("span", { class: "mono" }, hex.bytes.length ? rangeText(base, hex.bytes.length) : "0 byte"),
         sec ? h("span", { class: "dim" }, `${SECTION_LABEL[sec.name]}: 全 ${num(sec.length)} byte`) : null,
         hex.dir ? h("span", { class: "dim" }, `${hex.dir.kind === "root" ? "Root" : "Leaf"} Directory（${num(hex.dir.decoded.entries.length)} entries）`) : null,
+        hex.origin === "tile" ? h("span", { class: "dim" }, `Tile Data 内の 1 タイル（全 ${num(hex.truncatedFrom ?? hex.bytes.length)} byte）`) : null,
         canPage
           ? h(
               "span",
@@ -116,6 +117,9 @@ export function mountHexViewer(el: HTMLElement, store: Store<AppState>, ctl: Con
       sec && sec.length === 0 ? h("p", { class: "note" }, `${SECTION_LABEL[sec.name]} は長さ 0（このファイルには存在しない）です。`) : null,
       hex.dir && !plainDir
         ? h("p", { class: "note" }, `これは Internal Compression で圧縮された bytes です。varint はこの中には直接見えません（解凍後の bytes は Directory Encoding で確認できます）。`)
+        : null,
+      hex.truncatedFrom !== undefined
+        ? h("p", { class: "note" }, `先頭 ${num(hex.bytes.length)} byte だけ表示しています（全 ${num(hex.truncatedFrom)} byte は読み込み済み。追加の read はしていません）。解凍後の Payload は Tile Payload パネルで確認できます。`)
         : null,
       plainDir ? h("p", { class: "note" }, "Internal Compression = none なので、ファイル上の bytes がそのまま varint 列です。byte をクリックするとその entry を選びます。") : null,
       scroller,
@@ -153,6 +157,7 @@ const ORIGIN_LABEL = {
   "first-read": "先頭 16 KiB の read を再利用（追加 I/O なし）",
   "viewer-inspect": "表示のために追加で read",
   directory: "読み込み済みの Directory の bytes（追加 I/O なし）",
+  tile: "Range Read で読んだ tile の bytes（追加 I/O なし）",
 } as const;
 
 const COL_TITLE = { tileId: "TileID Δ", runLength: "RunLength", length: "Length", offset: "Offset 符号値" } as const;
@@ -198,5 +203,7 @@ function selectedRanges(s: AppState): ByteSpan[] {
         : [enc.tileIdDeltas[i]!, enc.runLengths[i]!, enc.lengths[i]!, enc.offsets[i]!];
       return spans.map((sp) => ({ offset: sel.dir.fileOffset + sp.offset, length: sp.length }));
     }
+    case "tile-data":
+      return [{ offset: sel.offset, length: sel.length }];
   }
 }

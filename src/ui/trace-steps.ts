@@ -12,7 +12,17 @@ export type UiTraceStep =
   | { kind: "tileid" }
   | { kind: "zoom-check"; step: Extract<LookupStep, { kind: "zoom-check" }> }
   | { kind: "directory"; step: Extract<LookupStep, { kind: "directory" }> }
-  | { kind: "result" };
+  | { kind: "result" }
+  /** ここから Physical Read。Tile Entry が見つかったときだけ現れる */
+  | { kind: "range-read" }
+  | { kind: "tile-decompress" }
+  | { kind: "payload" };
+
+export type PhysicalStepKind = "range-read" | "tile-decompress" | "payload";
+
+export function isPhysicalStep(s: UiTraceStep | undefined): s is Extract<UiTraceStep, { kind: PhysicalStepKind }> {
+  return s?.kind === "range-read" || s?.kind === "tile-decompress" || s?.kind === "payload";
+}
 
 export function buildTraceSteps(lookup: TileLookup): UiTraceStep[] {
   const out: UiTraceStep[] = [];
@@ -22,6 +32,8 @@ export function buildTraceSteps(lookup: TileLookup): UiTraceStep[] {
     else out.push({ kind: "directory", step: s });
   }
   out.push({ kind: "result" });
+  // 段の数は lookup の結論だけで決まる（read の前から見えている）。まだ辿っていない段を「これから起こること」として見せるため
+  if (lookup.result.status === "found") out.push({ kind: "range-read" }, { kind: "tile-decompress" }, { kind: "payload" });
   return out;
 }
 
@@ -39,6 +51,12 @@ export function stepTitle(s: UiTraceStep, lookup: TileLookup): string {
       return s.step.directory.kind === "root" ? "Root search" : `Leaf search${s.step.depth > 1 ? ` (深さ ${s.step.depth})` : ""}`;
     case "result":
       return lookup.result.status === "found" ? "Tile Entry" : "結果";
+    case "range-read":
+      return "Range Read";
+    case "tile-decompress":
+      return "Tile Decompression";
+    case "payload":
+      return "Tile Payload";
   }
 }
 

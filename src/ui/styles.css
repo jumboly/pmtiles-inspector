@@ -92,6 +92,7 @@ button.primary { background: var(--accent); color: #fff; border-color: transpare
   grid-template-areas:
     "layout layout"
     "trace trace"
+    "payload payload"
     "hilbert search"
     "header hex"
     "dir dir"
@@ -100,6 +101,7 @@ button.primary { background: var(--accent); color: #fff; border-color: transpare
 }
 #p-dir { grid-area: dir; }
 #p-trace { grid-area: trace; }
+#p-payload { grid-area: payload; }
 #p-hilbert { grid-area: hilbert; }
 #p-search { grid-area: search; }
 #p-enc { grid-area: enc; }
@@ -109,7 +111,7 @@ button.primary { background: var(--accent); color: #fff; border-color: transpare
 #p-meta { grid-area: meta; }
 #p-reads { grid-area: reads; }
 @media (max-width: 900px) {
-  .grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "layout" "trace" "hilbert" "search" "header" "hex" "dir" "enc" "meta" "reads"; }
+  .grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "layout" "trace" "payload" "hilbert" "search" "header" "hex" "dir" "enc" "meta" "reads"; }
 }
 
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; min-width: 0; display: flex; flex-direction: column; }
@@ -176,6 +178,7 @@ tr.selected, tr.selected:hover { background: color-mix(in srgb, var(--sel) 30%, 
 .badge { font-size: 11px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line); }
 .badge.first-read { color: var(--accent); border-color: var(--accent); }
 .badge.viewer-inspect { color: var(--c-metadata); border-color: var(--c-metadata); }
+.badge.tile { color: var(--c-target); border-color: var(--c-target); }
 .pager { display: inline-flex; gap: 4px; }
 .hex-scroll { position: relative; max-height: 540px; overflow: auto; font-family: var(--mono); font-size: 12px; line-height: 1.6; }
 .row { display: flex; gap: 14px; white-space: pre; }
@@ -207,6 +210,21 @@ tr.selected, tr.selected:hover { background: color-mix(in srgb, var(--sel) 30%, 
 .stat b { font-size: 17px; font-family: var(--mono); }
 .stat span { font-size: 11px; }
 .read-table tr.error td { color: var(--error); }
+.read-table tr.in-trace td:first-child { box-shadow: inset 3px 0 var(--c-target); font-weight: 700; }
+
+/* ---- read トラック（file layout） ----
+ * read の目的ごとの色。section 色と同系にして「どの section を読んだ read か」を色で追えるようにする。
+ * tile は section 色（灰）だと背景に埋もれるので、Tile Entry が指す先と同じ target 色にする */
+.p-header\+root, .p-root-directory { --c: var(--c-root); }
+.p-metadata { --c: var(--c-metadata); }
+.p-leaf-directory { --c: var(--c-leaf); }
+.p-tile-data { --c: var(--c-target); }
+.p-viewer-inspect, .p-other { --c: var(--c-gap); }
+.read-track { position: relative; height: 10px; margin-top: 3px; background: var(--bg); border-radius: 3px; }
+.read-mark { position: absolute; top: 0; bottom: 0; background: var(--c); opacity: 0.3; border-radius: 2px; }
+.read-mark.in-trace { opacity: 1; outline: 1px solid var(--text); z-index: 1; }
+.read-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 12px; }
+.read-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; background: var(--c); vertical-align: -1px; }
 
 /* ---- entry が指す先（file layout） ---- */
 .target-marker { position: absolute; top: -5px; bottom: -5px; border: 2px solid var(--c-target); background: color-mix(in srgb, var(--c-target) 25%, transparent); border-radius: 3px; pointer-events: none; }
@@ -301,6 +319,24 @@ tr.selected, tr.selected:hover { background: color-mix(in srgb, var(--sel) 30%, 
 .trace-step.current span { color: var(--text); }
 .trace-step.k-directory { border-left: 3px solid var(--c-leaf); }
 .trace-step.k-result { border-left: 3px solid var(--c-target); }
+.trace-step.k-physical { border-left: 3px dashed var(--c-target); }
+.budget { margin-top: 8px; font-size: 12px; width: auto; }
+.budget tr.sum td { font-weight: 600; border-bottom: 0; }
+
+/* ---- tile payload ---- */
+.pipeline .step.focus { border-color: var(--sel); background: color-mix(in srgb, var(--sel) 22%, transparent); }
+.pipeline .step.todo { opacity: 0.55; border-style: dashed; }
+.payload-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 12px; margin-bottom: 8px; }
+.payload-col { min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.payload-col.focus { border-color: var(--sel); box-shadow: 0 0 0 2px color-mix(in srgb, var(--sel) 40%, transparent); }
+.verdict { padding: 6px 8px; margin: 4px 0 8px; border-radius: 6px; font-size: 12px; background: var(--bg); }
+.verdict.v-warn { border-left: 3px solid var(--error); }
+.verdict.v-ok { border-left: 3px solid var(--c-leaf); }
+.verdict.v-na { border-left: 3px solid var(--c-gap); }
+.payload-dump { font-family: var(--mono); font-size: 12px; line-height: 1.6; max-height: 360px; overflow: auto; }
+.payload-dump .b { padding: 0 2px; margin-right: 1px; border-radius: 2px; }
+.payload-dump .b.ev { background: color-mix(in srgb, var(--c-target) 30%, transparent); font-weight: 700; }
+.text-preview { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-all; background: var(--bg); padding: 6px 8px; border-radius: 6px; max-height: 160px; overflow: auto; }
 .trace-detail { padding: 8px 12px; border-left: 3px solid var(--sel); background: color-mix(in srgb, var(--sel) 10%, transparent); border-radius: 0 6px 6px 0; }
 .trace-detail p { margin: 6px 0 0; }
 .io { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }

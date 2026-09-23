@@ -1,4 +1,4 @@
-import type { DirectoryRecord, MetadataRecord, PmtilesArchive, TileLookup } from "../core/pmtiles/archive";
+import type { DirectoryRecord, MetadataRecord, PmtilesArchive, TileLookup, TileRead } from "../core/pmtiles/archive";
 import type { HeaderKey, SectionName } from "../core/pmtiles/header";
 import type { FileLayout } from "../core/pmtiles/layout";
 import type { ReadRecord, TracingByteSource } from "../core/source/tracing-byte-source";
@@ -9,7 +9,9 @@ export type Selection =
   | { kind: "section"; name: SectionName }
   | { kind: "directory"; dir: DirectoryRecord }
   /** column を持つのは Encoding Viewer で特定の列の varint を選んだとき */
-  | { kind: "dir-entry"; dir: DirectoryRecord; index: number; column?: DirColumn };
+  | { kind: "dir-entry"; dir: DirectoryRecord; index: number; column?: DirColumn }
+  /** Physical Read で実際に読んだ tile の bytes（ファイル上の範囲） */
+  | { kind: "tile-data"; offset: number; length: number };
 
 /** Directory の 4 つの列。bytes 上もこの順に並ぶ (spec §4.3) */
 export type DirColumn = "tileId" | "runLength" | "length" | "offset";
@@ -31,13 +33,16 @@ export interface HexWindow {
   /**
    * 窓の出どころ。
    * first-read = 先頭 16 KiB の read を再利用 / viewer-inspect = 表示のために読んだ /
-   * directory = すでに読んである directory の bytes をそのまま見せている（追加 I/O なし）
+   * directory = すでに読んである directory の bytes をそのまま見せている（追加 I/O なし） /
+   * tile = Tile Trace の Range Read で読んだ tile の bytes をそのまま見せている（追加 I/O なし）
    */
-  origin: "first-read" | "viewer-inspect" | "directory";
+  origin: "first-read" | "viewer-inspect" | "directory" | "tile";
   /** origin = directory のとき、どの directory か */
   dir?: DirectoryRecord;
   /** section を表示している場合、その section 全体の範囲（ページ送りの上限に使う） */
   section?: { name: SectionName; offset: number; length: number };
+  /** bytes が元の長さから切り詰められている場合の元の長さ（tile は数百 KB になり得るので先頭だけ描く） */
+  truncatedFrom?: number;
 }
 
 /** Tile Trace の結果と、いま何段目を見ているか。Previous / Next はこの step を動かすだけ */
@@ -45,6 +50,11 @@ export interface TraceView {
   lookup: TileLookup;
   /** buildTraceSteps(lookup) の index */
   step: number;
+  /**
+   * Range Read の段に入ったときに読んだ tile。段に入るまでは undefined（まだ I/O していない）。
+   * 一度読んだら保持し、段を戻って進み直しても再 read しない（Read Trace に同じ read を重ねないため）。
+   */
+  tile?: TileRead;
 }
 
 export interface AppState {

@@ -111,3 +111,19 @@ Raster Inspector が失敗して Raw Inspector に fallback する例として�
 - 実装上の注意: TracingByteSource の read 通知は、archive が leaf をキャッシュに入れる**前**に届く。
   「leaf が読み込まれた」を知りたい Viewer は read の件数ではなく `archive.loadedLeafCount` を見る
 
+
+## Phase 4 で分かったこと
+
+- **公式実装は tile data をキャッシュしない**: `getZxyAttempt` は header と directory だけを `SharedPromiseCache` に入れ、
+  tile は毎回 `source.getBytes(tileDataOffset + offset, length)` で読む（HTTP キャッシュはブラウザ任せ）。
+  本実装の `readTileData` も同じで、同じタイルを 2 回 Trace すれば Read Trace に tile の read が 2 回現れる
+- Tile Trace は **Tile Entry の段で止め、Range Read の段に進んだときに初めて I/O する**。
+  lookup の結論（found / not-found）だけで段の数は決まるので、未読の段も「これから起こること」として先に見せている
+- 解凍は Header の Tile Compression の宣言だけに従う。中身の magic bytes（`tile-inspector/raw/sniff.ts`）は
+  「宣言と中身が合っているか」を見せるためだけに使い、解凍方式の選択には使わない
+  - brotli の stream には magic が無いので、bytes からは確認できない
+  - MVT は先頭 byte が `0x1A`（field 3 = layers, wire type 2）であることしか見ないので「mvt-like」と呼ぶ。MLT は判定しない
+- `leaf_z8` は Tile Type = png を名乗るが中身はテキストで、宣言と中身の食い違いの例になる
+- 1 タイルに必要な量（cold）の例: `leaf_z8` の z8 タイルは 16,384（先頭 16 KiB）+ 95（leaf）+ 14（tile）= 16,493 byte。
+  小さい archive では先頭 16 KiB が大半を占める。`zcta_z3` の z3 タイルは 1 つで 494 KB（archive の 18%）あり、
+  「ごく一部しか読まない」が目に見えるのは大きな archive を扱う Phase 5 から

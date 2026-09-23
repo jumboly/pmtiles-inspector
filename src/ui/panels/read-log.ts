@@ -1,19 +1,10 @@
 import type { ReadRecord } from "../../core/source/tracing-byte-source";
-import type { ReadPurpose } from "../../core/source/types";
 import { h, replaceChildren } from "../dom";
 import { num, percent, rangeText, size } from "../format";
 import type { AppState } from "../state";
 import type { Store } from "../store";
-
-const PURPOSE_LABEL: Record<ReadPurpose, string> = {
-  "header+root": "Header + Root",
-  "root-directory": "Root Directory",
-  metadata: "Metadata",
-  "leaf-directory": "Leaf Directory",
-  "tile-data": "Tile Data",
-  "viewer-inspect": "Viewer 表示用",
-  other: "その他",
-};
+import { PURPOSE_LABEL } from "../text/read-purpose";
+import { traceReadIds } from "../trace-reads";
 
 /**
  * TracingByteSource が記録したすべての read を並べる（Range Trace の原型）。
@@ -22,7 +13,7 @@ const PURPOSE_LABEL: Record<ReadPurpose, string> = {
  */
 export function mountReadLog(el: HTMLElement, store: Store<AppState>) {
   store.subscribe((s, prev) => {
-    if (s.reads !== prev.reads || s.source !== prev.source) render(s);
+    if (s.reads !== prev.reads || s.source !== prev.source || s.trace !== prev.trace) render(s);
   });
 
   function render(s: AppState) {
@@ -31,6 +22,8 @@ export function mountReadLog(el: HTMLElement, store: Store<AppState>) {
       return;
     }
     const total = s.source.size();
+    // 今の Trace で使った read の行に印を付け、File Layout の濃い印と対応させる
+    const inTrace = traceReadIds(s.trace);
     const needed = sum(s.reads.filter((r) => r.purpose !== "viewer-inspect"));
     const inspect = sum(s.reads.filter((r) => r.purpose === "viewer-inspect"));
     replaceChildren(
@@ -53,7 +46,7 @@ export function mountReadLog(el: HTMLElement, store: Store<AppState>) {
           s.reads.map((r) =>
             h(
               "tr",
-              { class: r.purpose === "viewer-inspect" ? "dim" : r.error ? "error" : "" },
+              { class: `${r.purpose === "viewer-inspect" ? "dim" : r.error ? "error" : ""}${inTrace.has(r.id) ? " in-trace" : ""}` },
               h("td", { class: "mono" }, `#${r.id}`),
               h("td", {}, PURPOSE_LABEL[r.purpose], r.label ? h("span", { class: "dim" }, ` ${r.label}`) : null),
               h("td", { class: "mono" }, rangeText(r.offset, r.requestedLength)),

@@ -1,11 +1,11 @@
-import { PmtilesArchive, type DirectoryRecord } from "../core/pmtiles/archive";
+import { PmtilesArchive, type DirectoryRecord, type TileLookup, type TileRead } from "../core/pmtiles/archive";
 import { HEADER_LAYOUT, type HeaderKey, type SectionName } from "../core/pmtiles/header";
 import { computeLayout } from "../core/pmtiles/layout";
 import { LocalFileSource } from "../core/source/local-file-source";
 import { TracingByteSource } from "../core/source/tracing-byte-source";
 import type { ByteSource } from "../core/source/types";
 import { isPlainDirectory } from "./directory-util";
-import { buildTraceSteps } from "./trace-steps";
+import { buildTraceSteps, isPhysicalStep } from "./trace-steps";
 import type { AppState, DirColumn, DirView, HexWindow } from "./state";
 import type { Store } from "./store";
 
@@ -31,6 +31,8 @@ export class Controller {
   private openSeq = 0;
   private traceSeq = 0;
   private playTimer: ReturnType<typeof setInterval> | undefined;
+  /** 読み込み中の tile の lookup。Auto 再生などで同じ tile の read を二重に発行しないため */
+  private tileLoading: TileLookup | undefined;
 
   constructor(private readonly store: Store<AppState>) {}
 
@@ -191,6 +193,7 @@ export class Controller {
   /**
    * z/x/y から Tile Entry までを辿る。
    * 探索に必要な leaf は読む（Read Trace に残る）が、tile data は読まない。
+   * tile data は Range Read の段に進んだときに初めて読む（Tile Addressing と Physical Read を別の段階として見せるため）。
    */
   async traceTile(z: number, x: number, y: number) {
     const archive = this.store.get().archive;
@@ -201,10 +204,11 @@ export class Controller {
     try {
       const lookup = await archive.lookupTile(z, x, y);
       if (seq !== this.traceSeq || this.store.get().archive !== archive) return;
-      const steps = buildTraceSteps(lookup);
+      // Tile Entry（または探索の結論）の段で止める。その先の Physical Read は Next で進んだときに I/O する
+      const stop = buildTraceSteps(lookup).findIndex((s) => s.kind === "result");
       const zoomPatch = z === this.store.get().hilbertZoom ? {} : hilbertZoomPatch(z);
-      this.store.set({ trace: { lookup, step: steps.length - 1 }, traceLoading: undefined, ...zoomPatch });
-      this.traceStep(steps.length - 1);
+      this.store.set({ trace: { lookup, step: stop }, traceLoading: undefined, ...zoomPatch });
+      this.traceStep(stop);
     } catch (e) {
       // z/x/y の範囲外など、lookup を始める前の入力エラー
       if (seq === this.traceSeq) this.store.set({ traceLoading: undefined, traceError: message(e) });
@@ -240,7 +244,41 @@ export class Controller {
       // directory に入る前の段（z/x/y → TileID の計算）では、まだファイル上のどこも指していないことを見せる
       patch.selection = undefined;
     }
+
+    // Physical Read の段: Directory 側は最後の leaf entry を開いたまま、Hex と選択は「読んだ tile の bytes」に移す
+    if (isPhysicalStep(steps[step])) {
+      if (trace.tile) {
+        patch.selection = { kind: "tile-data", offset: trace.tile.fileOffset, length: trace.tile.length };
+        patch.hex = tileHex(trace.tile);
+      } else {
+        this.store.set(patch);
+        void this.loadTile(trace.lookup);
+        return;
+      }
+    }
     this.store.set(patch);
+  }
+
+  /** Range Read の段で実際に tile を読む。読み終えたら今の段を描き直して各パネルを連動させる */
+  private async loadTile(lookup: TileLookup) {
+    const archive = this.store.get().archive;
+    const r = lookup.result;
+    if (!archive || r.status !== "found" || this.tileLoading === lookup) return;
+    this.tileLoading = lookup;
+    this.store.set({ traceLoading: "Tile Entry が指す範囲を読み込み中…", traceError: undefined });
+    try {
+      const a = lookup.address;
+      const tile = await archive.readTileData(r, `tile ${a.z}/${a.x}/${a.y}`);
+      const t = this.store.get().trace;
+      // 読んでいる間に別のタイルを Trace し直していたら結果は捨てる（Read Trace には記録として残る）
+      if (t?.lookup !== lookup) return;
+      this.store.set({ trace: { ...t, tile }, traceLoading: undefined });
+      this.traceStep(t.step);
+    } catch (e) {
+      if (this.store.get().trace?.lookup === lookup) this.store.set({ traceLoading: undefined, traceError: message(e) });
+    } finally {
+      if (this.tileLoading === lookup) this.tileLoading = undefined;
+    }
   }
 
   /** 先頭の段から自動で進める。最後の段に着いたら止まる */
@@ -257,6 +295,8 @@ export class Controller {
         this.stopTrace();
         return;
       }
+      // tile の read を待っている間は進めない。読む前に「解凍」の段へ進むと順序が逆に見えるため
+      if (this.tileLoading) return;
       this.traceStep(t.step + 1);
     }, TRACE_AUTO_INTERVAL_MS);
   }
@@ -324,6 +364,20 @@ function hilbertZoomPatch(z: number): Pick<AppState, "hilbertZoom" | "hilbertCur
  */
 function dirHex(dir: DirectoryRecord): HexWindow {
   return { baseOffset: dir.fileOffset, bytes: dir.compressed, origin: "directory", dir };
+}
+
+/**
+ * 読んだ tile の bytes（ファイル上 = 圧縮後）を Hex の窓にする。
+ * tile は数百 KB になり得るので、Hex Viewer には先頭だけを渡す（全体は Tile Payload パネルで扱う）。
+ */
+function tileHex(tile: TileRead): HexWindow {
+  const truncated = tile.raw.length > HEX_PAGE_SIZE;
+  return {
+    baseOffset: tile.fileOffset,
+    bytes: truncated ? tile.raw.subarray(0, HEX_PAGE_SIZE) : tile.raw,
+    origin: "tile",
+    truncatedFrom: truncated ? tile.raw.length : undefined,
+  };
 }
 
 /**

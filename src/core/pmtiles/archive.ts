@@ -101,6 +101,26 @@ export interface TileTrace {
 }
 
 /**
+ * Physical Read の記録: Tile Entry が指す範囲を実際に読み、Tile Compression を展開した結果。
+ * raw（ファイル上の bytes）と payload（解凍後）を両方残すのは、
+ * 「ファイルに入っているのは圧縮後の bytes で、Content Inspector が見るのは解凍後」という区別を見せるため。
+ */
+export interface TileRead {
+  entry: Entry;
+  /** tileDataOffset + entry.offset */
+  fileOffset: number;
+  length: number;
+  /** ファイル上の bytes（Tile Compression 適用後） */
+  raw: Uint8Array;
+  readId?: number;
+  /** Header の Tile Compression。解凍はこの値だけを根拠に行う（中身の magic bytes からは推測しない） */
+  compression: number;
+  /** 解凍後の bytes。解凍できなかった場合は undefined（raw は残るので Raw Inspector で見られる） */
+  payload?: Uint8Array;
+  decompressError?: string;
+}
+
+/**
  * PMTiles アーカイブ読み取りの中核。
  *
  * 公式 PMTiles クラスと同じ手順（先頭 16 KiB → root → leaf → tile）で読むが、
@@ -262,36 +282,39 @@ export class PmtilesArchive {
     const lookup = await this.lookupTile(z, x, y);
     const steps: TraceStep[] = [...lookup.steps];
     const r = lookup.result;
-    const result = r.status === "found" ? await this.readTile(r.entry, steps) : r;
-    return { address: lookup.address, steps, result };
+    if (r.status !== "found") return { address: lookup.address, steps, result: r };
+
+    const t = await this.readTileData(r, `tile ${z}/${x}/${y}`);
+    steps.push({ kind: "tile-read", entry: t.entry, fileOffset: t.fileOffset, length: t.length, readId: t.readId, bytes: t.raw });
+    steps.push({
+      kind: "tile-decompress",
+      compression: t.compression,
+      inputLength: t.raw.length,
+      outputLength: t.payload?.length,
+      error: t.decompressError,
+    });
+    return { address: lookup.address, steps, result: { status: "found", entry: t.entry, raw: t.raw, payload: t.payload } };
   }
 
-  private async readTile(entry: Entry, steps: TraceStep[]): Promise<TraceResult> {
-    const h = this.header;
-    const fileOffset = h.tileDataOffset + entry.offset;
-    const r = await this.source.read(fileOffset, entry.length, {
+  /**
+   * Physical Read: lookup が見つけた範囲を読み、Tile Compression を展開する。
+   *
+   * tile はキャッシュしない。公式 PMTiles クラスも tile data はキャッシュせず（directory だけ）、
+   * 同じタイルを再度読めば Read Trace にもう 1 回現れる、という実際のクライアントの挙動をそのまま見せるため。
+   */
+  async readTileData(found: Extract<LookupResult, { status: "found" }>, label?: string): Promise<TileRead> {
+    const { entry, fileOffset, length } = found;
+    const compression = this.header.tileCompression;
+    const r = await this.source.read(fileOffset, length, {
       purpose: "tile-data",
-      label: `tile entry ${entry.tileId}`,
+      label: label ?? `tile entry ${entry.tileId}`,
     });
-    steps.push({ kind: "tile-read", entry, fileOffset, length: entry.length, readId: r.readId, bytes: r.bytes });
+    const base = { entry, fileOffset, length, raw: r.bytes, readId: r.readId, compression };
     try {
-      const payload = await decompress(r.bytes, h.tileCompression);
-      steps.push({
-        kind: "tile-decompress",
-        compression: h.tileCompression,
-        inputLength: r.bytes.length,
-        outputLength: payload.length,
-      });
-      return { status: "found", entry, raw: r.bytes, payload };
+      return { ...base, payload: await decompress(r.bytes, compression) };
     } catch (e) {
       // 解凍できなくても raw bytes は返す。Raw Inspector で中身を確認できるようにするため
-      steps.push({
-        kind: "tile-decompress",
-        compression: h.tileCompression,
-        inputLength: r.bytes.length,
-        error: e instanceof Error ? e.message : String(e),
-      });
-      return { status: "found", entry, raw: r.bytes };
+      return { ...base, decompressError: e instanceof Error ? e.message : String(e) };
     }
   }
 }
