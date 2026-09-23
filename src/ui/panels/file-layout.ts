@@ -2,6 +2,7 @@ import { compressionName } from "../../core/pmtiles/enums";
 import { FIRST_READ_SIZE, type Header, type SectionName } from "../../core/pmtiles/header";
 import type { LayoutSegment } from "../../core/pmtiles/layout";
 import type { Controller } from "../controller";
+import { entryTarget } from "../directory-util";
 import { h, replaceChildren } from "../dom";
 import { hexOffset, num, percent, rangeText, size } from "../format";
 import type { AppState } from "../state";
@@ -68,11 +69,25 @@ export function mountFileLayout(el: HTMLElement, store: Store<AppState>, ctl: Co
       });
     };
 
+    // 選択中の entry が指す先（Tile Data または Leaf Directory）。Offset / Length が「どこを指すか」を物理位置で見せる
+    const sel = s.selection;
+    const target = sel?.kind === "dir-entry" ? entryTarget(sel.dir.decoded.entries[sel.index]!, h0) : undefined;
+    const targetMarker = (total: number, clip?: number) => {
+      if (!target) return null;
+      const end = Math.min(target.offset + target.length, clip ?? Infinity);
+      if (end <= target.offset) return null;
+      return h("div", {
+        class: "target-marker",
+        style: `left:${(target.offset / total) * 100}%;width:max(3px, ${((end - target.offset) / total) * 100}%)`,
+        title: `選択中の entry が指す範囲: ${rangeText(target.offset, target.length)}`,
+      });
+    };
+
     const zoomTotal = FIRST_READ_SIZE;
     replaceChildren(
       el,
       h("div", { class: "bar-label" }, h("span", {}, "0"), h("span", {}, `ファイル全体（実寸） ${size(fileSize)}`), h("span", {}, `EOF ${num(fileSize)}`)),
-      h("div", { class: "bar-wrap" }, h("div", { class: "bar" }, layout.segments.map((seg) => segEl(seg, fileSize))), hexMarker(fileSize)),
+      h("div", { class: "bar-wrap" }, h("div", { class: "bar" }, layout.segments.map((seg) => segEl(seg, fileSize))), hexMarker(fileSize), targetMarker(fileSize)),
       h(
         "div",
         { class: "bar-label" },
@@ -85,7 +100,9 @@ export function mountFileLayout(el: HTMLElement, store: Store<AppState>, ctl: Co
         { class: "bar-wrap" },
         h("div", { class: "bar zoom" }, layout.segments.map((seg) => segEl(seg, zoomTotal, zoomTotal)), fileSize < zoomTotal ? h("div", { class: "seg eof", style: `flex-grow:${(zoomTotal - fileSize) / zoomTotal}` }, h("span", {}, "EOF 以降")) : null),
         hexMarker(zoomTotal, zoomTotal),
+        targetMarker(zoomTotal, zoomTotal),
       ),
+
       h(
         "div",
         { class: "first-read" },
@@ -97,6 +114,14 @@ export function mountFileLayout(el: HTMLElement, store: Store<AppState>, ctl: Co
           firstReadLen < zoomTotal ? `（ファイルが 16 KiB 未満なので ${num(firstReadLen)} byte で EOF）` : "",
         ),
       ),
+      target
+        ? h(
+            "p",
+            { class: "target-note" },
+            h("span", { class: "target-swatch" }),
+            `選択中の entry → ${SECTION_LABEL[target.section]} 内 bytes ${rangeText(target.offset, target.length)}（${size(target.length)}）`,
+          )
+        : null,
       layout.issues.length ? h("ul", { class: "issues" }, layout.issues.map((i) => h("li", {}, `${ISSUE_TEXT[i.code]}: ${i.sections.map((n) => SECTION_LABEL[n]).join(", ")}`))) : null,
       sectionTable(layout.segments, fileSize, h0, selName, ctl),
     );
@@ -140,6 +165,8 @@ function sectionTable(segments: LayoutSegment[], fileSize: number, header: Heade
 function selectedSection(s: AppState): SectionName | undefined {
   const sel = s.selection;
   if (sel?.kind === "section") return sel.name;
+  // directory（や entry）を選んでいる間は、その directory 自身が置かれている section を光らせる
+  if (sel?.kind === "directory" || sel?.kind === "dir-entry") return sel.dir.kind === "root" ? "rootDirectory" : "leafDirectories";
   if (sel?.kind === "header-field") {
     // offset/length 系の field を選んだら、その field が指す section を光らせる
     // それ以外の field は Header 自身の一部なので Header を光らせる

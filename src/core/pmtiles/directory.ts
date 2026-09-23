@@ -1,5 +1,5 @@
 import type { ByteSpan, Spanned } from "./span";
-import { readVarint } from "./varint";
+import { encodeVarint, readVarint } from "./varint";
 
 export interface Entry {
   tileId: number;
@@ -131,4 +131,68 @@ export function decodeDirectory(buf: Uint8Array): DecodedDirectory {
     encoding: { count, tileIdDeltas, runLengths, lengths, offsets, columns, decodedLength: buf.length },
     issues,
   };
+}
+
+/**
+ * entries を spec §4.3 の規則で directory bytes（圧縮前）に符号化する。
+ *
+ * reader には不要だが、2 つの目的で持つ:
+ * - 公式 writer が作った bytes と一致するかを確かめ、「符号化規則を正しく理解しているか」をテストする
+ * - Directory Encoding Viewer で「行 → 列 → 差分 → varint」の各段階を同じ規則から示す
+ */
+export function encodeDirectory(entries: readonly Entry[]): Uint8Array {
+  const out: number[] = [];
+  const put = (v: number) => out.push(...encodeVarint(v));
+  put(entries.length);
+  let lastId = 0;
+  for (const e of entries) {
+    put(e.tileId - lastId);
+    lastId = e.tileId;
+  }
+  for (const e of entries) put(e.runLength);
+  for (const e of entries) put(e.length);
+  entries.forEach((e, i) => put(encodeOffset(entries, i).value));
+  return Uint8Array.from(out);
+}
+
+/** i 番目の entry の offset 符号値。直前 entry の直後に続いていれば 0、それ以外は offset + 1 */
+export function encodeOffset(entries: readonly Entry[], i: number): { value: number; mode: OffsetMode; expected?: number } {
+  const e = entries[i]!;
+  if (i > 0) {
+    const prev = entries[i - 1]!;
+    const expected = prev.offset + prev.length;
+    return e.offset === expected ? { value: 0, mode: "contiguous", expected } : { value: e.offset + 1, mode: "explicit", expected };
+  }
+  return { value: e.offset + 1, mode: "explicit" };
+}
+
+/**
+ * explicit になった offset の理由別件数。
+ * - backward: 既出 content の再利用（dedup）で前方を指す
+ * - resume  : dedup の直後、それまでに書かれた末尾（high-water mark）から再開する。
+ *             直前 entry（= 参照先の古い content）の直後ではないので 0 にできず explicit になる
+ * - forward : high-water mark より先へ飛ぶ。tile data が TileID 順に並んでいない（clustered でない）か、隙間がある
+ * clustered なアーカイブなら forward は 0 になる。
+ */
+export interface OffsetSummary {
+  contiguous: number;
+  first: number;
+  backward: number;
+  resume: number;
+  forward: number;
+}
+
+export function summarizeOffsets(entries: readonly Entry[]): OffsetSummary {
+  const s: OffsetSummary = { contiguous: 0, first: 0, backward: 0, resume: 0, forward: 0 };
+  let highWater = 0;
+  entries.forEach((e, i) => {
+    const enc = encodeOffset(entries, i);
+    if (enc.mode === "contiguous") s.contiguous++;
+    else if (enc.expected === undefined) s.first++;
+    else if (e.offset < enc.expected) s.backward++;
+    else if (e.offset === highWater) s.resume++;
+    else s.forward++;
+    highWater = Math.max(highWater, e.offset + e.length);
+  });
+  return s;
 }

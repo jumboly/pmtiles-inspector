@@ -62,6 +62,7 @@ Tile Type enum を試すための空アーカイブで、公式 reader は root 
 | `zcta_z3.pmtiles` | 公式サンプル `cb_2018_us_zcta510_500k.pmtiles` の z0-3 を切り出したもの（MVT, gzip） |
 | `terrarium_z2.pmtiles` | 公式サンプル `terrarium_z9.pmtiles` (30.5 GB) の z0-2 を切り出したもの（PNG, terrarium） |
 | `leaf_z8.pmtiles` | `scripts/make-leaf-fixture.py` → `pmtiles convert` で生成。leaf 有り。Addressed 87381 / Entries 44376 / Contents 44374 |
+| `leaf_z8_nocomp.pmtiles` | `leaf_z8` の Internal Compression を none にしたもの（Phase 2 で追加）。directory の varint がファイル上にそのまま現れる |
 
 `leaf_z8` の tile の中身は PNG ではなくテキスト（`tile z/x/y` や `ocean`）。header は png を名乗っている。
 Raster Inspector が失敗して Raw Inspector に fallback する例としても使える。
@@ -73,3 +74,22 @@ Raster Inspector が失敗して Raw Inspector に fallback する例として�
   → Terrain mode では「手動で terrarium として解釈する」切り替えが要る可能性がある（Phase 8 で検討）
 - `zcta_z3.pmtiles`（go-pmtiles の extract 出力）は Leaf Directories の長さが 0 で、offset は Tile Data と同じ位置を指す。
   長さ 0 の section は「位置は持つが中身は無い」ものとして File Layout に出す
+
+## Phase 2 で分かったこと
+
+- **符号化規則の理解を byte 単位で確認**: 全 fixture の全 directory（root + leaf）で、
+  自前 `encodeDirectory(decode(bytes))` が公式 Go writer の解凍後 bytes と完全一致する
+- Offset が explicit（`offset + 1`）になる理由は 3 通りに分けられる
+  - 先頭 entry
+  - **後方参照**: dedup で既出の content を指す
+  - **再開**: 後方参照の直後の entry。直前 entry（= 古い content）の直後ではなく、書き込み済み末尾から続くので 0 にできない
+  - clustered なら「前方ジャンプ」は起きない。`leaf_z8` では 後方参照 = 再開 = Tile Entries − Tile Contents = 2
+- 公式 Go writer の leaf は `leaf_z8` では 4096 entries ずつ（最後だけ 3416）
+- 圧縮の効き方（`leaf_z8` の leaf 1 つ, 4096 entries）:
+  固定長の行形式と仮定すると 98,304 B → 列指向 + 差分 + varint で 16,390 B（4 B/entry）→ gzip で 69 B。
+  合成データで値がほぼ一定なので極端に縮む。実データではここまで縮まない
+- 小さい directory では gzip がほとんど効かない（`zcta_z3` の root: 100 B → 92 B、`terrarium_z2`: 127 B → 97 B）。
+  gzip の header / trailer だけで 18 B かかるため
+- `leaf_z8_nocomp.pmtiles`（`scripts/make-uncompressed-fixture.py`）: `leaf_z8` の Internal Compression を none にしたもの。
+  leaf は解凍しただけで再符号化していない。leaf が大きくなって offset が伸びるため、root は 58 B → 77 B に増える。
+  Go CLI の `pmtiles verify` と、公式 JS reader による全タイル比較テストで正しさを確認

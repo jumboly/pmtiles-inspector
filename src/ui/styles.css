@@ -20,6 +20,14 @@
   --c-leaf: #1f9d6b;
   --c-tile: #7d8796;
   --c-gap: #c7ccd4;
+  --c-target: #e0457b;
+
+  /* Directory の列の色。section 色と被らないようにし、同じ列は Hex / Encoding で同じ色になる */
+  --c-col-count: #8a5cf6;
+  --c-col-tileId: #2f7fe0;
+  --c-col-runLength: #1f9d6b;
+  --c-col-length: #e09a1a;
+  --c-col-offset: #d9534f;
 
   --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
@@ -40,6 +48,12 @@
     --c-leaf: #3cc48f;
     --c-tile: #8f99a8;
     --c-gap: #3a424f;
+    --c-target: #ff6b9d;
+    --c-col-count: #a585ff;
+    --c-col-tileId: #5a9dff;
+    --c-col-runLength: #3cc48f;
+    --c-col-length: #f0b43c;
+    --c-col-offset: #ff7a75;
   }
 }
 
@@ -68,15 +82,19 @@ button.primary { background: var(--accent); color: #fff; border-color: transpare
   grid-template-areas:
     "layout layout"
     "header hex"
+    "dir dir"
+    "enc enc"
     "meta reads";
 }
+#p-dir { grid-area: dir; }
+#p-enc { grid-area: enc; }
 #p-layout { grid-area: layout; }
 #p-header { grid-area: header; }
 #p-hex { grid-area: hex; }
 #p-meta { grid-area: meta; }
 #p-reads { grid-area: reads; }
 @media (max-width: 900px) {
-  .grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "layout" "header" "hex" "meta" "reads"; }
+  .grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "layout" "header" "hex" "dir" "enc" "meta" "reads"; }
 }
 
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; min-width: 0; display: flex; flex-direction: column; }
@@ -173,3 +191,71 @@ tr.selected, tr.selected:hover { background: color-mix(in srgb, var(--sel) 30%, 
 .stat b { font-size: 17px; font-family: var(--mono); }
 .stat span { font-size: 11px; }
 .read-table tr.error td { color: var(--error); }
+
+/* ---- entry が指す先（file layout） ---- */
+.target-marker { position: absolute; top: -5px; bottom: -5px; border: 2px solid var(--c-target); background: color-mix(in srgb, var(--c-target) 25%, transparent); border-radius: 3px; pointer-events: none; }
+.target-note { margin: 6px 0 0; font-size: 12px; color: var(--c-target); }
+.target-swatch { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--c-target); border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+
+/* ---- directory columns ---- */
+.col-count { --c: var(--c-col-count); }
+.col-tileId { --c: var(--c-col-tileId); }
+.col-runLength { --c: var(--c-col-runLength); }
+.col-length { --c: var(--c-col-length); }
+.col-offset { --c: var(--c-col-offset); }
+.hex .b.col-count, .hex .b[class*="col-"] { background: color-mix(in srgb, var(--c) 18%, transparent); }
+.hex .b[class*="col-"].f1 { background: color-mix(in srgb, var(--c) 36%, transparent); }
+.b.sel-weak { outline: 1px solid var(--sel); outline-offset: -1px; }
+
+/* ---- directory viewer ---- */
+.dir-layout { display: grid; grid-template-columns: minmax(220px, 340px) minmax(0, 1fr); gap: 12px; }
+@media (max-width: 900px) { .dir-layout { grid-template-columns: minmax(0, 1fr); } }
+.dir-tree { border-right: 1px solid var(--line); padding-right: 8px; max-height: 640px; overflow: auto; }
+.tree-title { font-size: 11px; font-weight: 600; color: var(--dim); margin-bottom: 4px; }
+.dir-tree ul { list-style: none; margin: 0; padding-left: 14px; }
+.dir-tree ul.tree { padding-left: 0; }
+.tree-item { border: 0; background: none; padding: 1px 4px; text-align: left; border-radius: 4px; white-space: nowrap; }
+.tree-item:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.tree-item.current { background: color-mix(in srgb, var(--sel) 35%, transparent); font-weight: 600; }
+.tree-item.unloaded { color: var(--dim); }
+.tree-tiles { font-size: 12px; padding: 1px 4px; }
+.dir-main { min-width: 0; max-height: 640px; overflow: auto; }
+.dir-summary dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 6px 0; }
+.dir-summary dt { color: var(--dim); }
+.dir-summary dd { margin: 0; }
+.crumbs { font-weight: 600; }
+.legend { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; margin: 6px 0 8px; background: var(--bg); border-radius: 6px; font-size: 12px; }
+.dir-table tbody tr { cursor: pointer; }
+.dir-table tr.leaf-row td:first-child { box-shadow: inset 3px 0 var(--c-leaf); }
+.link-btn { padding: 0 6px; font-size: 12px; color: var(--c-leaf); border-color: var(--c-leaf); }
+.pager { display: inline-flex; gap: 4px; align-items: center; margin: 4px 0; }
+
+/* ---- encoding viewer ---- */
+#p-enc h3 { font-size: 12px; margin: 16px 0 6px; }
+#p-enc h3 .dim { font-weight: normal; margin-left: 6px; }
+.col-bar .seg { cursor: default; }
+.col-stats, .stage-table, .col-window, .varint table { margin: 8px 0; font-size: 12px; }
+.col-stats, .varint table { width: auto; }
+.size-cmp { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; font-size: 12px; }
+.size-row { display: grid; grid-template-columns: minmax(180px, 300px) minmax(80px, 1fr) max-content; gap: 8px; align-items: center; }
+.size-track { height: 12px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+.size-fill { display: block; height: 100%; border-radius: 3px; }
+.size-fill.naive { background: var(--c-gap); }
+.size-fill.varint { background: var(--c-col-tileId); }
+.size-fill.stored { background: var(--c-root); }
+.offset-sum ul { margin: 4px 0; padding-left: 18px; font-size: 12px; }
+.stage-table th { white-space: nowrap; }
+.stage-table .col-head { border-bottom: 3px solid var(--c); }
+.col-cell { cursor: pointer; }
+.col-cell.on { background: color-mix(in srgb, var(--sel) 22%, transparent); }
+.hscroll { overflow-x: auto; }
+.col-window { width: auto; }
+.col-window td { cursor: pointer; text-align: right; }
+.col-window tr.logical td { color: var(--dim); cursor: default; }
+.col-window tr.on th { background: color-mix(in srgb, var(--sel) 22%, transparent); }
+.col-window .cur { background: color-mix(in srgb, var(--sel) 30%, transparent); }
+.col-window td.zero { color: var(--c-col-offset); font-weight: 600; }
+.small { font-size: 11px; margin: 0; }
+.varint .cont { color: var(--c-col-offset); font-weight: 700; }
+.varint .stop { color: var(--c-col-runLength); font-weight: 700; }
+.dec-hex { max-height: 320px; }

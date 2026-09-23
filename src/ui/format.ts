@@ -34,6 +34,8 @@ export function hexBytes(bytes: Uint8Array, max = 16): string {
 export function percent(ratio: number): string {
   const p = ratio * 100;
   if (p === 0) return "0 %";
+  // 99.95% 以上を "100.0 %" と丸めると「全部」に見えてしまうので、100% 未満であることを残す
+  if (p >= 99.95 && p < 100) return "> 99.9 %";
   if (p >= 1) return `${p.toFixed(1)} %`;
   return `${p.toPrecision(3)} %`;
 }

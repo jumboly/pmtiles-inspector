@@ -1,6 +1,7 @@
 import { openAsBlob } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { FileSource, type Source } from "pmtiles";
+import type { PmtilesArchive } from "../src/core/pmtiles/archive";
 import { LocalFileSource } from "../src/core/source/local-file-source";
 
 export const FIXTURES = {
@@ -13,6 +14,8 @@ export const FIXTURES = {
   terrarium: "terrarium_z2.pmtiles",
   /** 公式 Go writer で生成した leaf directory / run-length / dedup 入り fixture */
   leaf: "leaf_z8.pmtiles",
+  /** leaf_z8 の Internal Compression を none にしたもの（scripts/make-uncompressed-fixture.py） */
+  leafNoComp: "leaf_z8_nocomp.pmtiles",
 } as const;
 
 export function fixturePath(name: string): string {
@@ -30,4 +33,15 @@ export async function ourSource(name: string): Promise<LocalFileSource> {
 export async function officialSource(name: string): Promise<Source> {
   const blob = await openAsBlob(fixturePath(name));
   return new FileSource(new File([blob], name));
+}
+
+/** 全ディレクトリ（root + すべての leaf）を自前実装で列挙する */
+export async function allDirectories(archive: PmtilesArchive) {
+  const dirs = [archive.root];
+  for (let i = 0; i < dirs.length; i++) {
+    for (const e of dirs[i]!.decoded.entries) {
+      if (e.runLength === 0) dirs.push((await archive.readLeafDirectory(e)).record);
+    }
+  }
+  return dirs;
 }

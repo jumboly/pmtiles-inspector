@@ -1,6 +1,8 @@
+import type { DirectoryRecord } from "../../core/pmtiles/archive";
 import { HEADER_LAYOUT } from "../../core/pmtiles/header";
 import type { ByteSpan } from "../../core/pmtiles/span";
 import { HEX_PAGE_SIZE, type Controller } from "../controller";
+import { isPlainDirectory } from "../directory-util";
 import { h, replaceChildren } from "../dom";
 import { hexByte, hexOffset, num, rangeText } from "../format";
 import type { AppState } from "../state";
@@ -52,7 +54,15 @@ export function mountHexViewer(el: HTMLElement, store: Store<AppState>, ctl: Con
         tints.push({ start: seg.offset, end: seg.offset + seg.length, cls: `sec-${seg.name}`, title: SECTION_LABEL[seg.name] });
       }
     }
-    const tintAt = (abs: number) => tints.find((t) => abs >= t.start && abs < t.end);
+    // 無圧縮 directory はファイル上の bytes がそのまま varint 列なので、列ごとに色を変え varint ごとに濃淡を交互にする
+    const plainDir = hex.dir && isPlainDirectory(hex.dir) ? hex.dir : undefined;
+    if (plainDir) tints.push(...varintTints(plainDir));
+    // byte ごとに tint を引くと数万 byte × 数万 tint になるため、先に byte → tint の表を作る（後勝ち = 細かい方が優先）
+    const tintOf: (Tint | undefined)[] = new Array(hex.bytes.length);
+    for (const t of tints) {
+      for (let a = Math.max(t.start, base); a < Math.min(t.end, base + hex.bytes.length); a++) tintOf[a - base] = t;
+    }
+    const tintAt = (abs: number) => tintOf[abs - base];
 
     const rows: HTMLElement[] = [];
     for (let r = 0; r < hex.bytes.length; r += 16) {
@@ -90,9 +100,10 @@ export function mountHexViewer(el: HTMLElement, store: Store<AppState>, ctl: Con
       h(
         "div",
         { class: "hex-head" },
-        h("span", { class: `badge ${hex.origin}` }, hex.origin === "first-read" ? "先頭 16 KiB の read を再利用（追加 I/O なし）" : "表示のために追加で read"),
+        h("span", { class: `badge ${hex.origin}` }, ORIGIN_LABEL[hex.origin]),
         h("span", { class: "mono" }, hex.bytes.length ? rangeText(base, hex.bytes.length) : "0 byte"),
         sec ? h("span", { class: "dim" }, `${SECTION_LABEL[sec.name]}: 全 ${num(sec.length)} byte`) : null,
+        hex.dir ? h("span", { class: "dim" }, `${hex.dir.kind === "root" ? "Root" : "Leaf"} Directory（${num(hex.dir.decoded.entries.length)} entries）`) : null,
         canPage
           ? h(
               "span",
@@ -103,6 +114,10 @@ export function mountHexViewer(el: HTMLElement, store: Store<AppState>, ctl: Con
           : null,
       ),
       sec && sec.length === 0 ? h("p", { class: "note" }, `${SECTION_LABEL[sec.name]} は長さ 0（このファイルには存在しない）です。`) : null,
+      hex.dir && !plainDir
+        ? h("p", { class: "note" }, `これは Internal Compression で圧縮された bytes です。varint はこの中には直接見えません（解凍後の bytes は Directory Encoding で確認できます）。`)
+        : null,
+      plainDir ? h("p", { class: "note" }, "Internal Compression = none なので、ファイル上の bytes がそのまま varint 列です。byte をクリックするとその entry を選びます。") : null,
       scroller,
     );
   }
@@ -113,27 +128,75 @@ export function mountHexViewer(el: HTMLElement, store: Store<AppState>, ctl: Con
       asciiSpans[i]?.classList.remove("sel");
     }
     lit = [];
-    const range = selectedRange(s);
-    if (!range || !scroller) return;
-    const from = Math.max(range.offset, base) - base;
-    const to = Math.min(range.offset + range.length, base + spans.length) - base;
-    for (let i = from; i < to; i++) {
-      spans[i]!.classList.add("sel");
-      asciiSpans[i]!.classList.add("sel");
-      lit.push(i);
+    const ranges = selectedRanges(s);
+    if (!ranges.length || !scroller) return;
+    let firstLit: number | undefined;
+    for (const range of ranges) {
+      const from = Math.max(range.offset, base) - base;
+      const to = Math.min(range.offset + range.length, base + spans.length) - base;
+      for (let i = from; i < to; i++) {
+        spans[i]!.classList.add("sel");
+        asciiSpans[i]!.classList.add("sel");
+        lit.push(i);
+        firstLit ??= i;
+      }
     }
-    const first = spans[from];
-    if (first && from < to) {
+    const first = firstLit !== undefined ? spans[firstLit] : undefined;
+    if (first) {
       const row = first.parentElement!.parentElement!;
       scroller.scrollTop = row.offsetTop - scroller.clientHeight / 3;
     }
   }
 }
 
-function selectedRange(s: AppState): ByteSpan | undefined {
+const ORIGIN_LABEL = {
+  "first-read": "先頭 16 KiB の read を再利用（追加 I/O なし）",
+  "viewer-inspect": "表示のために追加で read",
+  directory: "読み込み済みの Directory の bytes（追加 I/O なし）",
+} as const;
+
+const COL_TITLE = { tileId: "TileID Δ", runLength: "RunLength", length: "Length", offset: "Offset 符号値" } as const;
+
+/** 無圧縮 directory の各 varint を tint にする。位置はファイル上の絶対 offset に直す */
+function varintTints(dir: DirectoryRecord): Tint[] {
+  const enc = dir.decoded.encoding;
+  const base = dir.fileOffset;
+  const out: Tint[] = [{ start: base + enc.count.offset, end: base + enc.count.offset + enc.count.length, cls: "col-count", title: `entry 数 = ${enc.count.value}` }];
+  const cols = [
+    ["tileId", enc.tileIdDeltas],
+    ["runLength", enc.runLengths],
+    ["length", enc.lengths],
+    ["offset", enc.offsets],
+  ] as const;
+  for (const [col, list] of cols) {
+    list.forEach((v, i) =>
+      out.push({ start: base + v.offset, end: base + v.offset + v.length, cls: `col-${col} f${i % 2}`, title: `Entry #${i} ${COL_TITLE[col]} = ${num(v.value)}` }),
+    );
+  }
+  return out;
+}
+
+function selectedRanges(s: AppState): ByteSpan[] {
   const sel = s.selection;
-  if (!sel || !s.archive || !s.layout) return undefined;
-  if (sel.kind === "header-field") return s.archive.parsedHeader.spans[sel.key];
-  const seg = s.layout.segments.find((g) => g.kind === "section" && g.name === sel.name);
-  return seg ? { offset: seg.offset, length: seg.length } : undefined;
+  if (!sel || !s.archive || !s.layout) return [];
+  switch (sel.kind) {
+    case "header-field":
+      return [s.archive.parsedHeader.spans[sel.key]];
+    case "section": {
+      const seg = s.layout.segments.find((g) => g.kind === "section" && g.name === sel.name);
+      return seg ? [{ offset: seg.offset, length: seg.length }] : [];
+    }
+    case "directory":
+      return [{ offset: sel.dir.fileOffset, length: sel.dir.compressedLength }];
+    case "dir-entry": {
+      // 圧縮されている directory では、entry の varint はファイル上の byte と対応しないので光らせない
+      if (!isPlainDirectory(sel.dir)) return [];
+      const enc = sel.dir.decoded.encoding;
+      const i = sel.index;
+      const spans = sel.column
+        ? [{ tileId: enc.tileIdDeltas, runLength: enc.runLengths, length: enc.lengths, offset: enc.offsets }[sel.column][i]!]
+        : [enc.tileIdDeltas[i]!, enc.runLengths[i]!, enc.lengths[i]!, enc.offsets[i]!];
+      return spans.map((sp) => ({ offset: sel.dir.fileOffset + sp.offset, length: sp.length }));
+    }
+  }
 }

@@ -1,5 +1,7 @@
 import "./ui/styles.css";
 import { Controller } from "./ui/controller";
+import { mountDirectoryViewer } from "./ui/panels/directory-viewer";
+import { mountEncodingViewer } from "./ui/panels/encoding-viewer";
 import { mountFileLayout } from "./ui/panels/file-layout";
 import { mountHeaderInspector } from "./ui/panels/header-inspector";
 import { mountHexViewer } from "./ui/panels/hex-viewer";
@@ -17,6 +19,8 @@ mountOpener(document.getElementById("opener")!, store, ctl);
 mountFileLayout(body("p-layout"), store, ctl);
 mountHeaderInspector(body("p-header"), store, ctl);
 mountHexViewer(body("p-hex"), store, ctl);
+mountDirectoryViewer(body("p-dir"), store, ctl);
+mountEncodingViewer(body("p-enc"), store, ctl);
 mountMetadataViewer(body("p-meta"), store, ctl);
 mountReadLog(body("p-reads"), store);
 

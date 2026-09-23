@@ -7,6 +7,7 @@ import type { Store } from "../store";
 /** fixtures/ を Vite の publicDir として配信している。教材としてすぐ試せるように同梱サンプルを並べる */
 const SAMPLES = [
   { file: "leaf_z8.pmtiles", label: "Leaf あり (合成, z0-8)" },
+  { file: "leaf_z8_nocomp.pmtiles", label: "Leaf あり・Directory 無圧縮 (合成, z0-8)" },
   { file: "zcta_z3.pmtiles", label: "MVT (US ZCTA, z0-3)" },
   { file: "terrarium_z2.pmtiles", label: "Terrarium PNG (z0-2)" },
   { file: "test_fixture_1.pmtiles", label: "公式 fixture 1" },

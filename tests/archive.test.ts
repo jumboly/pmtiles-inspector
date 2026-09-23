@@ -5,20 +5,9 @@ import type { Entry } from "../src/core/pmtiles/directory";
 import { findTileTraced } from "../src/core/pmtiles/lookup";
 import { tileIdToZxy } from "../src/core/pmtiles/tileid";
 import { TracingByteSource } from "../src/core/source/tracing-byte-source";
-import { FIXTURES, officialSource, ourSource } from "./helpers";
+import { allDirectories, FIXTURES, officialSource, ourSource } from "./helpers";
 
-/** 全ディレクトリ（root + すべての leaf）を自前実装で列挙する */
-async function allDirectories(archive: PmtilesArchive) {
-  const dirs = [archive.root];
-  for (let i = 0; i < dirs.length; i++) {
-    for (const e of dirs[i]!.decoded.entries) {
-      if (e.runLength === 0) dirs.push((await archive.readLeafDirectory(e)).record);
-    }
-  }
-  return dirs;
-}
-
-const ARCHIVES = [FIXTURES.fixture1, FIXTURES.fixture2, FIXTURES.mlt, FIXTURES.zcta, FIXTURES.terrarium, FIXTURES.leaf];
+const ARCHIVES = [FIXTURES.fixture1, FIXTURES.fixture2, FIXTURES.mlt, FIXTURES.zcta, FIXTURES.terrarium, FIXTURES.leaf, FIXTURES.leafNoComp];
 
 describe("Directory decode vs 公式 getDirectory", () => {
   for (const name of ARCHIVES) {
@@ -67,7 +56,7 @@ describe("findTileTraced vs 公式 findTile", () => {
 });
 
 describe("traceTile vs 公式 getZxy", () => {
-  for (const name of [FIXTURES.fixture1, FIXTURES.mlt, FIXTURES.zcta, FIXTURES.terrarium, FIXTURES.leaf]) {
+  for (const name of [FIXTURES.fixture1, FIXTURES.mlt, FIXTURES.zcta, FIXTURES.terrarium, FIXTURES.leaf, FIXTURES.leafNoComp]) {
     it(`${name}: minZoom..maxZoom の全タイル + 範囲外 TileID`, async () => {
       const archive = await PmtilesArchive.open(await ourSource(name));
       const official = new PMTiles(await officialSource(name));

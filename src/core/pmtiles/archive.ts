@@ -153,17 +153,26 @@ export class PmtilesArchive {
     return rec;
   }
 
+  /** すでに読んである leaf を I/O なしで返す。Directory Viewer がツリーの「展開済み」を判定するのに使う */
+  peekLeafDirectory(entry: Entry): DirectoryRecord | undefined {
+    return this.dirCache.get(this.leafKey(entry));
+  }
+
+  private leafKey(entry: Entry): string {
+    return `${this.header.leafDirectoriesOffset + entry.offset}:${entry.length}`;
+  }
+
   /** leaf directory を読む。一度読んだものは再利用し、Trace 上で「cache」と分かるようにする */
-  async readLeafDirectory(entry: Entry): Promise<{ record: DirectoryRecord; cached: boolean }> {
+  async readLeafDirectory(entry: Entry, label?: string): Promise<{ record: DirectoryRecord; cached: boolean }> {
     const h = this.header;
     const fileOffset = h.leafDirectoriesOffset + entry.offset;
-    const key = `${fileOffset}:${entry.length}`;
+    const key = this.leafKey(entry);
     const hit = this.dirCache.get(key);
     if (hit) return { record: hit, cached: true };
 
     const r = await this.source.read(fileOffset, entry.length, {
       purpose: "leaf-directory",
-      label: `leaf @ tileId ${entry.tileId}`,
+      label: label ?? `leaf @ tileId ${entry.tileId}`,
     });
     const decompressed = await decompress(r.bytes, h.internalCompression);
     const decoded = decodeDirectory(decompressed);
