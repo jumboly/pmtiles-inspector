@@ -91,20 +91,27 @@ export function mountFileLayout(el: HTMLElement, store: Store<AppState>, ctl: Co
       });
     };
 
-    // Read Trace の全 read を帯の下のトラックに並べる。今の Trace（今の段まで）で使った read だけ濃く描く
+    // Read Trace の全 read を帯の下のトラックに並べる。今の Trace（今の段まで）で使った read だけ濃く描く。
+    // 地図描画の read は別のトラックにする。パンのたびに増える多数の read と、1 タイルの Trace の read を混ぜないため
     const inTrace = traceReadIds(s.trace);
     const reads = s.reads.filter((r) => !r.error && r.receivedLength > 0);
-    const readTrack = (total: number, clip?: number) =>
+    const viewerReads = reads.filter((r) => r.initiator !== "map");
+    const mapReads = reads.filter((r) => r.initiator === "map");
+    const readTracks = (total: number, clip?: number) => [
+      readTrack(viewerReads, total, clip, ""),
+      mapReads.length ? readTrack(mapReads, total, clip, " map-lane") : null,
+    ];
+    const readTrack = (list: ReadRecord[], total: number, clip: number | undefined, lane: string) =>
       h(
         "div",
-        { class: "read-track" },
-        reads.map((r) => {
+        { class: `read-track${lane}` },
+        list.map((r) => {
           const end = Math.min(r.offset + r.receivedLength, clip ?? Infinity);
           if (end <= r.offset) return null;
           return h("div", {
             class: `read-mark p-${r.purpose}${inTrace.has(r.id) ? " in-trace" : ""}`,
             style: `left:${(r.offset / total) * 100}%;width:max(3px, ${((end - r.offset) / total) * 100}%)`,
-            title: `READ #${r.id} ${PURPOSE_LABEL[r.purpose]}${r.label ? ` (${r.label})` : ""}\n${rangeText(r.offset, r.receivedLength)}（${size(r.receivedLength)}）`,
+            title: `READ #${r.id} ${r.initiator === "map" ? "[地図描画] " : ""}${PURPOSE_LABEL[r.purpose]}${r.label ? ` (${r.label})` : ""}\n${rangeText(r.offset, r.receivedLength)}（${size(r.receivedLength)}）`,
           });
         }),
       );
@@ -114,7 +121,7 @@ export function mountFileLayout(el: HTMLElement, store: Store<AppState>, ctl: Co
       el,
       h("div", { class: "bar-label" }, h("span", {}, "0"), h("span", {}, `ファイル全体（実寸） ${size(fileSize)}`), h("span", {}, `EOF ${num(fileSize)}`)),
       h("div", { class: "bar-wrap" }, h("div", { class: "bar" }, layout.segments.map((seg) => segEl(seg, fileSize))), hexMarker(fileSize), targetMarker(fileSize)),
-      readTrack(fileSize),
+      readTracks(fileSize),
       h(
         "div",
         { class: "bar-label" },
@@ -129,7 +136,7 @@ export function mountFileLayout(el: HTMLElement, store: Store<AppState>, ctl: Co
         hexMarker(zoomTotal, zoomTotal),
         targetMarker(zoomTotal, zoomTotal),
       ),
-      readTrack(zoomTotal, zoomTotal),
+      readTracks(zoomTotal, zoomTotal),
 
       h(
         "div",
@@ -159,7 +166,8 @@ export function mountFileLayout(el: HTMLElement, store: Store<AppState>, ctl: Co
 
 /** read トラックの凡例。実際に現れた目的だけを出す（凡例が長くなりすぎないように） */
 function readLegend(reads: ReadRecord[], inTrace: Set<number>, tracing: boolean) {
-  const purposes = [...new Set(reads.map((r) => r.purpose))];
+  const purposes = [...new Set(reads.filter((r) => r.initiator !== "map").map((r) => r.purpose))];
+  const mapReads = reads.filter((r) => r.initiator === "map");
   const traced = reads.filter((r) => inTrace.has(r.id));
   const tracedBytes = traced.reduce((a, r) => a + r.receivedLength, 0);
   return h(
@@ -167,6 +175,9 @@ function readLegend(reads: ReadRecord[], inTrace: Set<number>, tracing: boolean)
     { class: "read-legend" },
     h("span", { class: "dim" }, "帯の下のトラック = 実際に read した範囲:"),
     purposes.map((p) => h("span", {}, h("span", { class: `read-swatch p-${p}` }), PURPOSE_LABEL[p])),
+    mapReads.length
+      ? h("span", {}, h("span", { class: "read-swatch map" }), `2 段目 = 地図描画（leaf + tile, ${mapReads.length} 回, 計 ${size(mapReads.reduce((a, r) => a + r.receivedLength, 0))}）`)
+      : null,
     tracing
       ? h("span", { class: "dim" }, `濃い印 = 今の Trace の今の段までに使った read（${traced.length} 回, 計 ${size(tracedBytes)}）。薄い印 = それ以外の read`)
       : null,

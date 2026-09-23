@@ -19,6 +19,11 @@ const SAFELISTED = new Set(["cache-control", "content-language", "content-length
 export function mountReadLog(el: HTMLElement, store: Store<AppState>) {
   /** 詳細を開いている READ 番号。パネル内だけの表示状態なので store には入れない */
   const open = new Set<number>();
+  /**
+   * 地図描画の read を表に出すか。地図はパンのたびに数十の read を起こすので、既定では隠して集計だけ見せる
+   * （Tile Trace の数行が埋もれないように）。
+   */
+  let showMap = false;
 
   store.subscribe((s, prev) => {
     if (s.source !== prev.source) {
@@ -39,6 +44,9 @@ export function mountReadLog(el: HTMLElement, store: Store<AppState>) {
     const inTrace = traceReadIds(s.trace);
     const needed = sum(s.reads.filter((r) => r.purpose !== "viewer-inspect" && r.purpose !== "size-probe"));
     const inspect = sum(s.reads.filter((r) => r.purpose === "viewer-inspect"));
+    const mapReads = s.reads.filter((r) => r.initiator === "map");
+    const mapBytes = sum(mapReads);
+    const rows = showMap ? s.reads : s.reads.filter((r) => r.initiator !== "map");
     const isHttp = s.sourceDesc?.kind === "http";
     const requests = s.reads.reduce((a, r) => a + (r.http?.exchanges.length ?? 0), 0);
     const toggle = (id: number) => {
@@ -57,9 +65,29 @@ export function mountReadLog(el: HTMLElement, store: Store<AppState>) {
         stat("Actually Read", size(needed), `${num(needed)} B（PMTiles として必要だった分）`),
         stat("Read Ratio", total ? percent(needed / total) : "—", total ? "Archive Size に対する割合" : "Archive Size が分からないので出せない"),
         stat("Viewer 表示用の追加 read", size(inspect), `${num(inspect)} B`),
+        mapReads.length ? stat("うち地図描画", size(mapBytes), `${num(mapReads.length)} 回（leaf + tile）`) : null,
         isHttp ? stat("HTTP request", num(requests), "416 の取り直し・HEAD・診断を含む") : null,
       ),
       s.archiveSize?.origin === "unknown" ? h("p", { class: "note" }, `Archive Size が分からない理由: ${s.archiveSize.reason}`) : null,
+      mapReads.length
+        ? h(
+            "label",
+            { class: "map-toggle" },
+            (() => {
+              const cb = h("input", {
+                type: "checkbox",
+                onchange: (ev: Event) => {
+                  showMap = (ev.target as HTMLInputElement).checked;
+                  render(store.get());
+                },
+              });
+              cb.checked = showMap;
+              return cb;
+            })(),
+            ` 地図描画の read ${num(mapReads.length)} 件を表に出す`,
+            h("span", { class: "dim" }, "（集計には常に含む）"),
+          )
+        : null,
       h(
         "table",
         { class: "read-table" },
@@ -67,19 +95,20 @@ export function mountReadLog(el: HTMLElement, store: Store<AppState>) {
         h(
           "tbody",
           {},
-          s.reads.flatMap((r) => {
-            const cls = `${r.purpose === "viewer-inspect" || r.purpose === "size-probe" ? "dim" : r.error ? "error" : ""}${inTrace.has(r.id) ? " in-trace" : ""}${r.http ? " clickable" : ""}`;
+          rows.flatMap((r) => {
+            const aborted = r.errorKind === "aborted";
+            const cls = `${r.purpose === "viewer-inspect" || r.purpose === "size-probe" || aborted ? "dim" : r.error ? "error" : ""}${inTrace.has(r.id) ? " in-trace" : ""}${r.http ? " clickable" : ""}`;
             const row = h(
               "tr",
               { class: cls, onclick: r.http ? () => toggle(r.id) : undefined, title: r.http ? "クリックで HTTP のやり取りを開く / 閉じる" : undefined },
               h("td", { class: "mono" }, r.http ? `${open.has(r.id) ? "▾" : "▸"} #${r.id}` : `#${r.id}`),
-              h("td", {}, PURPOSE_LABEL[r.purpose], r.label ? h("span", { class: "dim" }, ` ${r.label}`) : null),
+              h("td", {}, r.initiator === "map" ? h("span", { class: "read-swatch map", title: "地図描画" }) : null, PURPOSE_LABEL[r.purpose], r.label ? h("span", { class: "dim" }, ` ${r.label}`) : null),
               h("td", { class: "mono" }, r.purpose === "size-probe" ? "—（HEAD）" : rangeText(r.offset, r.requestedLength)),
               h("td", { class: "mono" }, num(r.requestedLength)),
               h(
                 "td",
                 { class: "mono" },
-                r.error ? h("span", {}, "失敗") : num(r.receivedLength),
+                r.error ? h("span", {}, aborted ? "中断" : "失敗") : num(r.receivedLength),
                 // 先頭 16 KiB 要求が小さいファイルで EOF に当たったケースを明示する
                 r.receivedLength < r.requestedLength && !r.error ? h("span", { class: "dim" }, "（EOF）") : null,
               ),

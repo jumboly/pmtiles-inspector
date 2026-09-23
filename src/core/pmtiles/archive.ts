@@ -1,4 +1,4 @@
-import type { ByteSource } from "../source/types";
+import type { ByteSource, ReadInitiator } from "../source/types";
 import { decompress } from "./compression";
 import { decodeDirectory, type DecodedDirectory, type Entry } from "./directory";
 import { FIRST_READ_SIZE, HEADER_SIZE, parseHeader, type Header, type ParsedHeader } from "./header";
@@ -120,6 +120,16 @@ export interface TileRead {
   decompressError?: string;
 }
 
+/** archive の read に呼び出し側が添える情報。parser の判断には使わず、ByteSource の ReadContext にそのまま渡す */
+export interface ArchiveReadOptions {
+  initiator?: ReadInitiator;
+  /**
+   * tile data の read だけに渡す。leaf は複数の要求で共有されるので、1 つの要求の中断で leaf の read を止めない
+   * （公式 SharedPromiseCache は参照数を数えて全員が中断したときだけ止めるが、ここでは共有 read を中断しない単純な形にしている）。
+   */
+  signal?: AbortSignal;
+}
+
 /**
  * PMTiles アーカイブ読み取りの中核。
  *
@@ -128,6 +138,11 @@ export interface TileRead {
  */
 export class PmtilesArchive {
   private dirCache = new Map<string, DirectoryRecord>();
+  /**
+   * 読んでいる最中の leaf。地図は同じ leaf の範囲にあるタイルを一度に何十枚も要求するので、
+   * これが無いと同じ leaf を同時に何度も読んでしまう（公式 SharedPromiseCache も pending の Promise を共有する）。
+   */
+  private leafInflight = new Map<string, Promise<DirectoryRecord>>();
 
   private constructor(
     readonly source: ByteSource,
@@ -210,15 +225,32 @@ export class PmtilesArchive {
   }
 
   /** leaf directory を読む。一度読んだものは再利用し、Trace 上で「cache」と分かるようにする */
-  async readLeafDirectory(entry: Entry, label?: string): Promise<{ record: DirectoryRecord; cached: boolean }> {
-    const h = this.header;
-    const fileOffset = h.leafDirectoriesOffset + entry.offset;
+  /** cached = この呼び出しでは I/O していない（読み終えた leaf の再利用、または他の要求が読んでいる最中の read に相乗り） */
+  async readLeafDirectory(entry: Entry, label?: string, opts?: ArchiveReadOptions): Promise<{ record: DirectoryRecord; cached: boolean }> {
     const key = this.leafKey(entry);
     const hit = this.dirCache.get(key);
     if (hit) return { record: hit, cached: true };
+    const pending = this.leafInflight.get(key);
+    if (pending) return { record: await pending, cached: true };
 
+    const p = this.fetchLeafDirectory(entry, label, opts?.initiator);
+    this.leafInflight.set(key, p);
+    try {
+      const record = await p;
+      this.dirCache.set(key, record);
+      return { record, cached: false };
+    } finally {
+      // 失敗した read は共有し続けない（次の要求で読み直せるように）
+      this.leafInflight.delete(key);
+    }
+  }
+
+  private async fetchLeafDirectory(entry: Entry, label: string | undefined, initiator: ReadInitiator | undefined): Promise<DirectoryRecord> {
+    const h = this.header;
+    const fileOffset = h.leafDirectoriesOffset + entry.offset;
     const r = await this.source.read(fileOffset, entry.length, {
       purpose: "leaf-directory",
+      initiator,
       label: label ?? `leaf @ tileId ${entry.tileId}`,
     });
     const decompressed = await decompress(r.bytes, h.internalCompression);
@@ -227,7 +259,7 @@ export class PmtilesArchive {
     if (decoded.entries.length === 0) {
       throw new Error(`leaf directory (file offset ${fileOffset}) の entry 数が 0 です`);
     }
-    const record: DirectoryRecord = {
+    return {
       kind: "leaf",
       fileOffset,
       compressedLength: entry.length,
@@ -236,15 +268,13 @@ export class PmtilesArchive {
       decoded,
       readId: r.readId,
     };
-    this.dirCache.set(key, record);
-    return { record, cached: false };
   }
 
   /**
    * z/x/y から Tile Entry を探す（Root → Leaf の探索まで）。
    * 必要な leaf directory は読む（探索に不可欠なため）が、tile data は読まない。
    */
-  async lookupTile(z: number, x: number, y: number): Promise<TileLookup> {
+  async lookupTile(z: number, x: number, y: number, opts?: ArchiveReadOptions): Promise<TileLookup> {
     const address = zxyToTileId(z, x, y);
     const steps: LookupStep[] = [{ kind: "address", address }];
     const done = (result: LookupResult): TileLookup => ({ address, steps, result });
@@ -267,7 +297,7 @@ export class PmtilesArchive {
         if (entry.runLength > 0) {
           return done({ status: "found", entry, fileOffset: h.tileDataOffset + entry.offset, length: entry.length });
         }
-        const leaf = await this.readLeafDirectory(entry);
+        const leaf = await this.readLeafDirectory(entry, undefined, { initiator: opts?.initiator });
         dir = leaf.record;
         obtainedBy = leaf.cached ? "cache" : "read";
       }
@@ -302,11 +332,13 @@ export class PmtilesArchive {
    * tile はキャッシュしない。公式 PMTiles クラスも tile data はキャッシュせず（directory だけ）、
    * 同じタイルを再度読めば Read Trace にもう 1 回現れる、という実際のクライアントの挙動をそのまま見せるため。
    */
-  async readTileData(found: Extract<LookupResult, { status: "found" }>, label?: string): Promise<TileRead> {
+  async readTileData(found: Extract<LookupResult, { status: "found" }>, label?: string, opts?: ArchiveReadOptions): Promise<TileRead> {
     const { entry, fileOffset, length } = found;
     const compression = this.header.tileCompression;
     const r = await this.source.read(fileOffset, length, {
       purpose: "tile-data",
+      initiator: opts?.initiator,
+      signal: opts?.signal,
       label: label ?? `tile entry ${entry.tileId}`,
     });
     const base = { entry, fileOffset, length, raw: r.bytes, readId: r.readId, compression };

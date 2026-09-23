@@ -124,3 +124,45 @@ export function alignedBlock(z: number, x: number, y: number, k: number) {
   const firstTileId = zoomBase(z) + firstHilbertIndex;
   return { x0: bx * size, y0: by * size, size, firstHilbertIndex, firstTileId, lastTileId: firstTileId + size * size - 1 };
 }
+
+/** ズーム z 上の 2^k × 2^k の整列ブロック（左上のタイル座標と一辺のタイル数） */
+export interface TileBlock {
+  z: number;
+  x0: number;
+  y0: number;
+  size: number;
+}
+
+/**
+ * ズーム z の Hilbert index の半開区間 [start, end) を、整列ブロックの並びに分解する（Hilbert 順）。
+ *
+ * alignedBlock の逆: Hilbert index が [m·4^k, (m+1)·4^k) の区間は、ズーム z-k で index m のマスを
+ * 2^k × 2^k に細分したブロックそのもの。区間の端から「揃っていて収まる最大のブロック」を貪欲に取っていけば、
+ * 区間はズームごとに高々 6z 個程度の正方形になる。leaf が担当する TileID 区間を地図上の面として描くために使う。
+ */
+export function hilbertRangeBlocks(z: number, start: number, end: number): TileBlock[] {
+  assertZoom(z);
+  const total = 4 ** z;
+  let i = Math.max(0, start);
+  const stop = Math.min(end, total);
+  const out: TileBlock[] = [];
+  while (i < stop) {
+    let k = 0;
+    // 4^(k+1) で割り切れ、かつ区間に収まる限り、ブロックを 1 段大きくする
+    while (k < z && i % 4 ** (k + 1) === 0 && i + 4 ** (k + 1) <= stop) k++;
+    const size = 2 ** k;
+    const [bx, by] = hilbertIndexToXy(z - k, i / 4 ** k);
+    out.push({ z, x0: bx * size, y0: by * size, size });
+    i += 4 ** k;
+  }
+  return out;
+}
+
+/**
+ * Global TileID の半開区間 [start, end) のうち、ズーム z に属する部分を整列ブロックに分解する。
+ * leaf の担当区間は複数のズームにまたがり得るので、見たいズームで切り出してから分解する。
+ */
+export function tileIdRangeBlocks(z: number, start: number, end: number): TileBlock[] {
+  const base = zoomBase(z);
+  return hilbertRangeBlocks(z, start - base, Math.min(end, zoomBase(z + 1)) - base);
+}

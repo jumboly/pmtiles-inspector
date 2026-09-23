@@ -6,6 +6,10 @@ export default defineConfig({
   base: "./",
   // テスト用 fixture をそのまま「サンプル」として配信する（同じファイルでテストと画面の挙動を揃えるため）
   publicDir: "fixtures",
+  build: {
+    // MapLibre（約 1 MB）は archive を開いたときに dynamic import で読む別 chunk なので、初期表示の重さにはならない
+    chunkSizeWarningLimit: 1100,
+  },
   test: {
     include: ["tests/**/*.test.ts"],
   },

@@ -35,6 +35,14 @@
   --c-region-3: #1baf7a;
   --c-region-4: #eda100;
 
+  /* 背景地図。archive の中身より目立たないよう、彩度を落とした無彩色寄りにする */
+  --map-water: #dfe6ee;
+  --map-land: #f7f8fa;
+  --map-border: #9aa4b2;
+  --map-label: #6b7585;
+  /* 地図描画の read。操作（Tile Trace など）による read と別のトラックに描く */
+  --c-map-read: #0e9aa7;
+
   --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
 }
@@ -64,6 +72,11 @@
     --c-region-2: #d95926;
     --c-region-3: #199e70;
     --c-region-4: #c98500;
+    --map-water: #0f141b;
+    --map-land: #1f2631;
+    --map-border: #4a5566;
+    --map-label: #8e98a8;
+    --c-map-read: #35c2cf;
   }
 }
 
@@ -89,16 +102,19 @@ button.primary { background: var(--accent); color: #fff; border-color: transpare
   gap: 12px;
   padding: 12px 16px 24px;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  /* Map と Hilbert を横に並べる。同じタイルが「地理的な位置」と「TileID 上の位置」でどこにあるかを同時に見比べるため */
   grid-template-areas:
+    "map hilbert"
     "layout layout"
     "trace trace"
     "payload payload"
-    "hilbert search"
+    "search search"
     "header hex"
     "dir dir"
     "enc enc"
     "meta reads";
 }
+#p-map { grid-area: map; }
 #p-dir { grid-area: dir; }
 #p-trace { grid-area: trace; }
 #p-payload { grid-area: payload; }
@@ -111,7 +127,7 @@ button.primary { background: var(--accent); color: #fff; border-color: transpare
 #p-meta { grid-area: meta; }
 #p-reads { grid-area: reads; }
 @media (max-width: 900px) {
-  .grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "layout" "trace" "payload" "hilbert" "search" "header" "hex" "dir" "enc" "meta" "reads"; }
+  .grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "map" "hilbert" "layout" "trace" "payload" "search" "header" "hex" "dir" "enc" "meta" "reads"; }
 }
 
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; min-width: 0; display: flex; flex-direction: column; }
@@ -222,6 +238,7 @@ tr.selected, tr.selected:hover { background: color-mix(in srgb, var(--sel) 30%, 
 .p-viewer-inspect, .p-size-probe, .p-other { --c: var(--c-gap); }
 .read-track { position: relative; height: 10px; margin-top: 3px; background: var(--bg); border-radius: 3px; }
 .read-mark { position: absolute; top: 0; bottom: 0; background: var(--c); opacity: 0.3; border-radius: 2px; }
+.read-track.map-lane .read-mark { --c: var(--c-map-read); }
 .read-mark.in-trace { opacity: 1; outline: 1px solid var(--text); z-index: 1; }
 .read-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 12px; }
 .read-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; background: var(--c); vertical-align: -1px; }
@@ -392,3 +409,13 @@ tr.selected, tr.selected:hover { background: color-mix(in srgb, var(--sel) 30%, 
 .header-table { width: auto; font-size: 12px; }
 .header-table td { padding: 1px 12px 1px 0; border: none; }
 .http-line { margin: 6px 0; padding: 6px 8px; background: var(--bg); border-radius: 6px; font-size: 12px; overflow-x: auto; }
+
+/* Map */
+.map-info { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-bottom: 6px; font-size: 12px; }
+.map-wrap { height: 480px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+/* MapLibre の CSS が container に position: relative を付けるので、絶対配置ではなく高さで広げる */
+.map-canvas { width: 100%; height: 100%; }
+.map-reads { margin-top: 6px; font-size: 12px; }
+.map-reads .read-swatch, .read-swatch.map { background: var(--c-map-read); }
+#p-map .note, #p-map .error { margin: 6px 0 0; }
+.map-toggle { display: block; margin: 0 0 8px; font-size: 12px; }

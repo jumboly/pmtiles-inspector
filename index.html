@@ -12,6 +12,7 @@
     </header>
     <div id="open-error" class="open-error" hidden></div>
     <main class="grid">
+      <section class="panel" id="p-map"><h2>Map <small>地図のタイル ↔ z/x/y ↔ TileID（クリックで Trace）</small></h2><div class="body"></div></section>
       <section class="panel" id="p-layout"><h2>File Layout <small>物理配置</small></h2><div class="body"></div></section>
       <section class="panel" id="p-trace"><h2>Tile Trace <small>z/x/y → TileID → Root / Leaf → Tile Entry → Range Read → Payload</small></h2><div class="body"></div></section>
       <section class="panel" id="p-payload"><h2>Tile Payload <small>読んだ bytes → Tile Decompression → Payload</small></h2><div class="body"></div></section>
@@ -63,6 +64,8 @@
             Terrarium は上記と同じ Terrain Tiles（帰属表示は上記のとおり）。
             Overture POI は <a href="https://overturemaps.org/">Overture Maps Foundation</a> の Places データ。
           </dd>
+          <dt>背景地図</dt>
+          <dd><a href="https://demotiles.maplibre.org/">MapLibre demotiles</a>（国境・海岸線。地図の右下にも帰属表示が出ます）。</dd>
           <dt>Leaf あり (合成)</dt>
           <dd>このリポジトリの <code>scripts/</code> で生成した合成データ。</dd>
         </dl>

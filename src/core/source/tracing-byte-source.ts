@@ -1,4 +1,4 @@
-import type { ByteSource, HttpReadInfo, ObservedReadError, ReadContext, ReadPurpose, ReadResult, SizeProbe } from "./types";
+import type { ByteSource, HttpReadInfo, ObservedReadError, ReadContext, ReadInitiator, ReadPurpose, ReadResult, SizeProbe } from "./types";
 
 export interface ReadRecord {
   /** 1 始まりの通し番号。UI 上の "READ #n" に対応する。 */
@@ -8,6 +8,7 @@ export interface ReadRecord {
   /** 実際に受け取った byte 数（EOF で短くなる場合がある） */
   receivedLength: number;
   purpose: ReadPurpose;
+  initiator: ReadInitiator;
   label?: string;
   startedAt: number;
   durationMs: number;
@@ -58,6 +59,7 @@ export class TracingByteSource implements ByteSource {
       offset,
       requestedLength: length,
       purpose: ctx?.purpose ?? "other",
+      initiator: ctx?.initiator ?? "viewer",
       label: ctx?.label,
       startedAt,
     } as const;
@@ -84,7 +86,7 @@ export class TracingByteSource implements ByteSource {
   async probeSize(ctx?: ReadContext): Promise<SizeProbe> {
     if (!this.inner.probeSize) throw new Error("この Source はサイズを調べられません");
     const startedAt = now();
-    const base = { id: this.nextId++, offset: 0, requestedLength: 0, purpose: "size-probe", label: ctx?.label, startedAt } as const;
+    const base = { id: this.nextId++, offset: 0, requestedLength: 0, purpose: "size-probe", initiator: ctx?.initiator ?? "viewer", label: ctx?.label, startedAt } as const;
     try {
       const probe = await this.inner.probeSize(ctx);
       this.push({ ...base, receivedLength: 0, durationMs: now() - startedAt, http: probe.http });
@@ -102,7 +104,8 @@ export class TracingByteSource implements ByteSource {
       receivedLength: 0,
       durationMs: now() - base.startedAt,
       error: e instanceof Error ? e.message : String(e),
-      errorKind: obs?.kind,
+      // 地図のパンで不要になったタイル要求は MapLibre が中断する。失敗ではないので種類を分けて表示できるようにする
+      errorKind: isAbort(e) ? "aborted" : obs?.kind,
       http: obs?.http,
     });
   }
@@ -111,6 +114,10 @@ export class TracingByteSource implements ByteSource {
     this.records.push(record);
     for (const l of this.listeners) l(record);
   }
+}
+
+function isAbort(e: unknown): boolean {
+  return (e as { name?: unknown } | undefined)?.name === "AbortError";
 }
 
 function now(): number {

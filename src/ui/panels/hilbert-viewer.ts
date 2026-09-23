@@ -1,5 +1,4 @@
 import type { PmtilesArchive } from "../../core/pmtiles/archive";
-import { entryTileIdRange } from "../../core/pmtiles/lookup";
 import { alignedBlock, hilbertXyToIndex, MAX_ZOOM, zoomBase } from "../../core/pmtiles/tileid";
 import { HILBERT_MAX_WINDOW_ZOOM, type Controller } from "../controller";
 import { h, replaceChildren } from "../dom";
@@ -7,7 +6,7 @@ import { num } from "../format";
 import type { AppState } from "../state";
 import type { Store } from "../store";
 import { classifyTile, rootLeafOrdinals, type TileClass } from "../tile-class";
-import { buildTraceSteps, directoryStepAt } from "../trace-steps";
+import { traceRange } from "../trace-range";
 
 /** canvas の論理サイズ（CSS px）。2^8 マスで 1 マス 2px になる */
 const CANVAS_PX = 512;
@@ -47,12 +46,15 @@ export function mountHilbertViewer(el: HTMLElement, store: Store<AppState>, ctl:
       hover = cell;
       drawOverlay(store.get());
       renderInfo(store.get());
+      // 地図にも同じタイルの枠を出す（TileID 上の位置 ↔ 地理的な位置 を同時に見せるため）
+      ctl.setHoverTile(cell && grid ? { z: grid.z, ...cell, from: "hilbert" } : undefined);
     }
   });
   canvas.addEventListener("mouseleave", () => {
     hover = undefined;
     drawOverlay(store.get());
     renderInfo(store.get());
+    ctl.setHoverTile(undefined);
   });
   canvas.addEventListener("click", (ev) => {
     const cell = cellAt(ev);
@@ -75,6 +77,10 @@ export function mountHilbertViewer(el: HTMLElement, store: Store<AppState>, ctl:
       s.dirView !== prev.dirView
     )
       render(s);
+    else if (s.hoverTile !== prev.hoverTile && (s.hoverTile?.from === "map" || prev.hoverTile?.from === "map")) {
+      drawOverlay(s);
+      renderInfo(s);
+    }
   });
 
   function render(s: AppState) {
@@ -292,6 +298,14 @@ export function mountHilbertViewer(el: HTMLElement, store: Store<AppState>, ctl:
     const a = s.trace?.lookup.address;
     if (a && a.z === g.z) outline(a.x, a.y, css.getPropertyValue("--sel").trim(), 3);
     if (hover) outline(hover.x, hover.y, css.getPropertyValue("--text").trim(), 2);
+    const mh = mapHover(s);
+    if (mh) outline(mh.x, mh.y, css.getPropertyValue("--text").trim(), 2);
+  }
+
+  /** 地図上でカーソルが載っているタイル（このズームのものだけ。別ズームのタイルはこの grid 上に 1 マスとして存在しない） */
+  function mapHover(s: AppState) {
+    const t = s.hoverTile;
+    return t?.from === "map" && grid && t.z === grid.z ? t : undefined;
   }
 
   function renderInfo(s: AppState) {
@@ -299,9 +313,10 @@ export function mountHilbertViewer(el: HTMLElement, store: Store<AppState>, ctl:
     if (!archive || !grid) return;
     const g = grid;
     const a = s.trace?.lookup.address;
-    const target = hover ?? (a && a.z === g.z ? { x: a.x, y: a.y } : undefined);
+    const mh = mapHover(s);
+    const target = hover ?? mh ?? (a && a.z === g.z ? { x: a.x, y: a.y } : undefined);
     const z = g.z;
-    const title = hover ? "カーソル位置" : "Trace 中のタイル";
+    const title = hover ? "カーソル位置" : mh ? "地図上のカーソル位置" : "Trace 中のタイル";
     let detail: HTMLElement;
     if (!target) {
       detail = h("p", { class: "dim" }, "マスにカーソルを載せると z/x/y・Hilbert index・TileID を、クリックするとそのタイルの Tile Trace を表示します。");
@@ -371,37 +386,6 @@ function focusTile(s: AppState, z: number): { x: number; y: number } {
   if (!a) return { x: 0, y: 0 };
   const scale = 2 ** (z - a.z);
   return { x: Math.floor(a.x * scale), y: Math.floor(a.y * scale) };
-}
-
-/**
- * 今の Trace 段が注目している TileID の区間。
- * - z/x/y 〜 TileID の段: そのタイル 1 つ
- * - directory 探索の段: 候補 entry が担当する区間（leaf なら leaf 全体、tile なら run）
- * - Tile Entry 以降の段: 最後に見つけた tile entry の run
- */
-function traceRange(s: AppState): { start: number; end: number } | undefined {
-  const t = s.trace;
-  if (!t) return undefined;
-  const steps = buildTraceSteps(t.lookup);
-  const cur = steps[t.step];
-  if (!cur) return undefined;
-  // directory に入る前の段だけがタイル 1 つ。探索以降（Physical Read の段を含む）は最後に辿った entry の担当区間を見せ続ける
-  if (cur.kind === "zxy" || cur.kind === "hilbert" || cur.kind === "tileid" || cur.kind === "zoom-check") {
-    return { start: t.lookup.address.tileId, end: t.lookup.address.tileId + 1 };
-  }
-  const ds = directoryStepAt(steps, t.step);
-  if (!ds) return undefined;
-  // 親 directory から受け継いだ上限。leaf の最後の entry の担当範囲を正しく閉じるため、root から順に絞り込む
-  let upper = Infinity;
-  for (const s2 of steps.slice(0, ds.index + 1)) {
-    if (s2.kind !== "directory") continue;
-    const ci = s2.step.search.candidateIndex;
-    if (ci === undefined) return undefined;
-    const r = entryTileIdRange(s2.step.directory.decoded.entries, ci, upper);
-    if (s2 === steps[ds.index]) return s2.step.search.outcome === "outside-run" ? undefined : r;
-    upper = r.end;
-  }
-  return undefined;
 }
 
 function classText(c: TileClass | undefined): string {

@@ -61,6 +61,17 @@ export interface TraceView {
   tile?: TileRead;
 }
 
+/**
+ * いまカーソルが載っているタイル。地図と Hilbert Viewer の間で「同じタイルが両方でどこにあるか」を見せるために共有する。
+ * from はカーソルの持ち主。持ち主の側は自前でカーソルを描いているので、相手側だけが枠を描く。
+ */
+export interface HoverTile {
+  z: number;
+  x: number;
+  y: number;
+  from: "map" | "hilbert";
+}
+
 export interface AppState {
   status: "idle" | "loading" | "ready" | "error";
   error?: string;
@@ -90,6 +101,7 @@ export interface AppState {
   tracePlaying?: boolean;
   /** Hilbert Viewer が描いているズーム */
   hilbertZoom: number;
+  hoverTile?: HoverTile;
   /** Hilbert 曲線を重ねるか。高ズームでは線が密になりすぎて grid が読めなくなるため切り替え可能にする */
   hilbertCurve: boolean;
 }

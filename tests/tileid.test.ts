@@ -1,6 +1,6 @@
 import { tileIdToZxy as officialTileIdToZxy, zxyToTileId as officialZxyToTileId } from "pmtiles";
 import { describe, expect, it } from "vitest";
-import { alignedBlock, tileIdToZxy, zxyToTileId, zoomBase } from "../src/core/pmtiles/tileid";
+import { alignedBlock, hilbertRangeBlocks, hilbertXyToIndex, tileIdRangeBlocks, tileIdToZxy, zxyToTileId, zoomBase } from "../src/core/pmtiles/tileid";
 
 describe("TileID", () => {
   it("spec §4.1 の表と一致する", () => {
@@ -77,5 +77,42 @@ describe("TileID", () => {
         }
       }
     }
+  });
+});
+
+describe("hilbertRangeBlocks / tileIdRangeBlocks", () => {
+  /** ブロックが覆うタイルの Hilbert index をすべて列挙する（分解が区間とぴったり一致するかを総当たりで確かめる） */
+  const covered = (blocks: ReturnType<typeof hilbertRangeBlocks>) =>
+    blocks.flatMap((b) => Array.from({ length: b.size * b.size }, (_, n) => hilbertXyToIndex(b.z, b.x0 + (n % b.size), b.y0 + Math.floor(n / b.size))));
+
+  it("任意の区間を、重なりも漏れもなく整列ブロックで覆う（z=0..5 の全区間の一部を総当たり）", () => {
+    for (let z = 0; z <= 5; z++) {
+      const total = 4 ** z;
+      const step = Math.max(1, Math.floor(total / 37));
+      for (let a = 0; a < total; a += step) {
+        for (let b = a + 1; b <= total; b += step) {
+          const idx = covered(hilbertRangeBlocks(z, a, b)).sort((p, q) => p - q);
+          expect(idx).toEqual(Array.from({ length: b - a }, (_, n) => a + n));
+        }
+      }
+    }
+  });
+
+  it("整列した区間はブロック 1 つになり、ブロック数はズームに対して小さく抑えられる", () => {
+    expect(hilbertRangeBlocks(4, 0, 256)).toEqual([{ z: 4, x0: 0, y0: 0, size: 16 }]);
+    const block = alignedBlock(10, 300, 700, 3);
+    const h0 = block.firstTileId - zoomBase(10);
+    expect(hilbertRangeBlocks(10, h0, h0 + 64)).toEqual([{ z: 10, x0: block.x0, y0: block.y0, size: 8 }]);
+    expect(hilbertRangeBlocks(14, 12345, 9876543).length).toBeLessThanOrEqual(6 * 14);
+  });
+
+  it("TileID の区間はズームで切り出してから分解する（別ズームにはみ出た部分は含めない）", () => {
+    // z1 の後半 2 タイル + z2 全体 + z3 の先頭 1 タイル
+    const start = zoomBase(1) + 2;
+    const end = zoomBase(3) + 1;
+    expect(covered(tileIdRangeBlocks(1, start, end)).sort()).toEqual([2, 3]);
+    expect(tileIdRangeBlocks(2, start, end)).toEqual([{ z: 2, x0: 0, y0: 0, size: 4 }]);
+    expect(covered(tileIdRangeBlocks(3, start, end))).toEqual([0]);
+    expect(tileIdRangeBlocks(4, start, end)).toEqual([]);
   });
 });

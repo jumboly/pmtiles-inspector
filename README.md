@@ -6,6 +6,11 @@ Header・File Layout・Root / Leaf Directory・Directory Encoding（列指向 / 
 Tile Trace では z/x/y → Hilbert position → TileID → Root / Leaf の binary search → Tile Entry → Range Read → Tile Decompression → Tile Payload を 1 段ずつ追えます。
 読んだ範囲は File Layout 上に、1 タイルのために読んだ量の内訳は Tile Trace に表示されます。
 
+Map（MapLibre GL JS）には archive の中身とタイル境界・z/x/y を重ね、クリックしたタイルから Tile Trace を始められます。
+地図描画のタイル取得も公式ライブラリではなく自前の archive 実装を通すので、パン・ズームで起きた read は Read Trace と File Layout に「地図描画」として現れます。
+Trace の段に合わせて、候補の leaf が担当する TileID 区間を地図上の面として表示し、地図と Hilbert Viewer の間でカーソル位置も連動します。
+背景地図には [MapLibre demotiles](https://demotiles.maplibre.org/) を使っています。
+
 ローカルファイル（`Blob.slice`）のほか、URL の archive を HTTP Range Request で開けます。
 Read Trace では各 read の request（Range ヘッダ）と response（status・ヘッダ・CORS で読めなかったヘッダ）を確認でき、
 CORS / Range 非対応 / mixed content などで開けなかった場合は原因と確認方法を表示します。

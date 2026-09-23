@@ -205,7 +205,7 @@ function stepDetail(archive: PmtilesArchive, s: UiTraceStep, t: TraceView, rc: R
         s.step.obtainedBy === "first-read"
           ? `先頭 16 KiB（READ #${d.readId ?? "?"}）に含まれていた Root を使う。追加の I/O なし`
           : s.step.obtainedBy === "cache"
-            ? `以前 READ #${d.readId ?? "?"} で読んだ leaf を再利用。追加の I/O なし`
+            ? `以前 READ #${d.readId ?? "?"} で${rc.reads.find((r) => r.id === d.readId)?.initiator === "map" ? "地図描画のために" : ""}読んだ leaf を再利用。追加の I/O なし`
             : `leaf を READ #${d.readId ?? "?"} で読んだ: bytes ${rangeText(d.fileOffset, d.compressedLength)}（${size(d.compressedLength)}）→ Internal Decompression → ${size(d.decompressed.length)} → decode`;
       const e = r.entry;
       return box(

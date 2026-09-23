@@ -25,8 +25,16 @@ export type ReadPurpose =
   | "size-probe"
   | "other";
 
+/**
+ * 誰がその read を起こしたか。purpose（PMTiles のどの構造を読んだか）とは別の軸。
+ * viewer = Tile Trace や Directory Viewer などの操作 / map = MapLibre が地図を描くためのタイル要求。
+ * 地図はパンするたびに多数のタイルを読むので、操作による read と混ぜると 1 タイルの Trace が読み取れなくなる。
+ */
+export type ReadInitiator = "viewer" | "map";
+
 export interface ReadContext {
   purpose?: ReadPurpose;
+  initiator?: ReadInitiator;
   /** 人間向けの補足ラベル（例: "leaf for tileId 1234"）。表示用だが parser の判断には使わない。 */
   label?: string;
   signal?: AbortSignal;

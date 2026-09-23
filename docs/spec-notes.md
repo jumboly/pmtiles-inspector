@@ -161,3 +161,25 @@ Raster Inspector が失敗して Raw Inspector に fallback する例として�
   - `terrarium_z9`（28.4 GiB）の z0: 16,384（先頭）+ 10,082（leaf）+ 106,274（tile）byte。metadata 681 byte を含めて約 133 KB = 0.00044 %
   - `overture-pois`（4.34 GiB）の z14 中心タイル: 16,384 + 7,948（leaf）+ 387,205（tile）byte
   - Local と HTTP で read の並び（offset / length / 目的）は完全に同じ（テストで確認）。違うのは HTTP の観測情報だけ
+
+## Phase 6 で分かったこと
+
+- **MapLibre GL JS 6.11.1（2026-09 時点の latest）**: custom protocol は `addProtocol(name, (params, abortController) => Promise<{ data }>)`。
+  main thread で登録すれば worker からのタイル要求も main thread に回ってくるので、自前の `PmtilesArchive`（と TracingByteSource）をそのまま使える。
+  vector source は `encoding: "mlt"` で MLT を描ける（`TileEncoding = "mlt" | "mvt"`）
+- **公式 Protocol（pmtiles@4.5.0 の `tilev4`）の欠損タイルの返し方**: vector（MVT / MLT）は空の `Uint8Array`、raster は `data: null`。
+  MapLibre の raster source は `data` が null のタイルを「中身の無い透明なタイル」として描く（型定義には無いが実装がそう扱う）。
+  自前の `loadTileForMap` は公式 Protocol と bytes 単位で一致することをテストで確認（zcta / terrarium / MLT / leaf_z8）
+- **公式 SharedPromiseCache は読んでいる最中の directory の Promise を共有する**（同じ leaf を同時に何度も読まない）。
+  地図は同じ leaf の範囲のタイルを一度に何十枚も要求するので、自前実装にも読み途中の leaf の共有を入れた。
+  公式は参照数を数えて全員が中断したときだけ leaf の read を止めるが、本実装は leaf の read を中断しない（中断するのは tile data の read だけ）
+- **タイルの z の決まり方**: MapLibre は `z = floor(地図ズーム + log2(512 / tileSize))`（raster は round）。
+  PMTiles の Header にはタイルのピクセルサイズが無いので、vector・raster とも `tileSize: 512` にして「地図ズーム ≒ タイルの z」にしている。
+  maxZoom を超えると maxZoom のタイルを引き伸ばす（overzoom）。画面を覆うタイルは `map.coveringTiles()` で MapLibre 自身と同じ並びを得られる。
+  傾き（pitch）があると画面の奥ほど低いズームのタイルが混ざるので、回転・傾きは無効にしている
+- **MapLibre 6 の worker**: 既定では自分の `import.meta.url` から `maplibre-gl-worker.mjs` を探すが、Vite の依存事前バンドルで位置がずれて読めない。
+  `maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url` で Vite にバンドルさせ、`setWorkerUrl()` で渡す
+- **attribution は HTML として描かれる**: metadata の `attribution` はファイル由来の文字列なので、タグを落として escape してから渡す
+- **leaf の担当区間を地図上の面にする**: TileID の連続区間は、ズームごとに高々 6z 個程度の整列ブロック（2^k × 2^k の正方形）に分解できる（`hilbertRangeBlocks`）。
+  Hilbert 曲線が「大きい象限から順に辿る」ことの裏返しで、leaf が地図上でひとかたまりの領域になる理由そのもの
+- 実測: MLT fixture は root に entry が無いので、地図の z0 要求（2 回）は Root を引くだけで「無い」と分かり、tile の read は 0 回

@@ -8,7 +8,7 @@ import type { ByteSource } from "../core/source/types";
 import { isPlainDirectory } from "./directory-util";
 import { buildTraceSteps, isPhysicalStep } from "./trace-steps";
 import { sizeBytes, sizeFromProbe, type ArchiveSize } from "./archive-size";
-import type { AppState, DirColumn, DirView, HexWindow, SourceDesc } from "./state";
+import type { AppState, DirColumn, DirView, HexWindow, HoverTile, SourceDesc } from "./state";
 import type { Store } from "./store";
 
 /** Hex Viewer が 1 度に読む量。巨大 section を開いても全体を読まないための上限 */
@@ -80,6 +80,7 @@ export class Controller {
       trace: undefined,
       traceLoading: undefined,
       traceError: undefined,
+      hoverTile: undefined,
     });
     // read が起きるたびに Range Trace を更新する。後から別ファイルを開いたら古い通知は捨てる
     source.subscribe(() => {
@@ -343,6 +344,13 @@ export class Controller {
 
   setHilbertZoom(z: number) {
     this.store.set(hilbertZoomPatch(z));
+  }
+
+  setHoverTile(t: HoverTile | undefined) {
+    const cur = this.store.get().hoverTile;
+    // mousemove は同じマスの上でも連続で来るので、変わったときだけ流す（全パネルの購読者を無駄に起こさない）
+    if (cur?.z === t?.z && cur?.x === t?.x && cur?.y === t?.y && cur?.from === t?.from) return;
+    this.store.set({ hoverTile: t });
   }
 
   setHilbertCurve(on: boolean) {
