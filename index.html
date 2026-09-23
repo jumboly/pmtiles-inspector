@@ -19,6 +19,44 @@
       <section class="panel" id="p-meta"><h2>Metadata <small>JSON</small></h2><div class="body"></div></section>
       <section class="panel" id="p-reads"><h2>Read Trace <small>ByteSource への全 read</small></h2><div class="body"></div></section>
     </main>
+    <!--
+      同梱サンプルの出典。terrarium の標高データは提供元ごとに帰属表示が必須なため、
+      Tilezen/joerd の docs/attribution.md にある "Required attribution" をそのまま載せる。
+    -->
+    <footer class="credits">
+      <details>
+        <summary>サンプルデータの出典</summary>
+        <dl>
+          <dt>Terrarium PNG (z0-2)</dt>
+          <dd>
+            Protomaps のサンプル <code>terrarium_z9.pmtiles</code>（Mapzen / Tilezen Terrain Tiles）の z0-2 を切り出したもの。
+            <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md">Terrain Tiles の帰属表示</a>:
+            <ul>
+              <li>ArcticDEM terrain data DEM(s) were created from DigitalGlobe, Inc., imagery and funded under National Science Foundation awards 1043681, 1559691, and 1542736;</li>
+              <li>Australia terrain data © Commonwealth of Australia (Geoscience Australia) 2017;</li>
+              <li>Austria terrain data © offene Daten Österreichs – Digitales Geländemodell (DGM) Österreich;</li>
+              <li>Canada terrain data contains information licensed under the Open Government Licence – Canada;</li>
+              <li>Europe terrain data produced using Copernicus data and information funded by the European Union - EU-DEM layers;</li>
+              <li>Global ETOPO1 terrain data U.S. National Oceanic and Atmospheric Administration</li>
+              <li>Mexico terrain data source: INEGI, Continental relief, 2016;</li>
+              <li>New Zealand terrain data Copyright 2011 Crown copyright (c) Land Information New Zealand and the New Zealand Government (All rights reserved);</li>
+              <li>Norway terrain data © Kartverket;</li>
+              <li>United Kingdom terrain data © Environment Agency copyright and/or database right 2015. All rights reserved;</li>
+              <li>United States 3DEP (formerly NED) and global GMTED2010 and SRTM terrain data courtesy of the U.S. Geological Survey.</li>
+            </ul>
+          </dd>
+          <dt>MVT (US ZCTA, z0-3)</dt>
+          <dd>U.S. Census Bureau, 2018 Cartographic Boundary Files（<code>cb_2018_us_zcta510_500k</code>）を元にした Protomaps のサンプルの z0-3 を切り出したもの。</dd>
+          <dt>公式 fixture 1 / 公式 MLT fixture</dt>
+          <dd>
+            <a href="https://github.com/protomaps/PMTiles">protomaps/PMTiles</a> の <code>js/test/data</code> より。
+            MLT fixture の metadata には © OpenStreetMap contributors / © Overture Maps Foundation の帰属表示が含まれる。
+          </dd>
+          <dt>Leaf あり (合成)</dt>
+          <dd>このリポジトリの <code>scripts/</code> で生成した合成データ。</dd>
+        </dl>
+      </details>
+    </footer>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

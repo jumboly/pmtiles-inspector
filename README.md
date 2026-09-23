@@ -1,0 +1,56 @@
+# PMTiles Internals Viewer
+
+PMTiles v3 の内部構造を「使う」ためではなく「理解する」ための Viewer です。
+Header・File Layout・Root / Leaf Directory・Directory Encoding（列指向 / 差分 / varint）を、
+生 bytes と論理値を対応付けながら確認できます。
+
+公開版: https://www.jumboly.jp/pmtiles-inspector/
+
+## 開発
+
+```sh
+npm ci
+npm run dev    # http://localhost:5173
+npm test       # 公式 pmtiles JS 実装を Reference Oracle とした比較テスト
+npm run build
+```
+
+main に push すると GitHub Actions がテスト・ビルドを行い、GitHub Pages にデプロイします。
+
+仕様確認の記録と公式実装との差は [docs/spec-notes.md](docs/spec-notes.md) にあります。
+
+## サンプルデータの出典
+
+`fixtures/` のファイルはテストと画面のサンプルを兼ねています。
+
+| ファイル | 出典 |
+|---|---|
+| `terrarium_z2.pmtiles` | Protomaps のサンプル `terrarium_z9.pmtiles`（Mapzen / Tilezen Terrain Tiles）の z0-2 を切り出したもの。下記の帰属表示が必要 |
+| `zcta_z3.pmtiles` | U.S. Census Bureau, 2018 Cartographic Boundary Files（`cb_2018_us_zcta510_500k`）を元にした Protomaps のサンプルの z0-3 を切り出したもの |
+| `test_fixture_*.pmtiles`, `invalid*.pmtiles` | [protomaps/PMTiles](https://github.com/protomaps/PMTiles) の `js/test/data` より。`test_fixture_mlt` の metadata には © OpenStreetMap contributors / © Overture Maps Foundation の帰属表示が含まれる |
+| `leaf_z8.pmtiles`, `leaf_z8_nocomp.pmtiles` | `scripts/` で生成した合成データ |
+
+### Terrain Tiles の帰属表示
+
+[tilezen/joerd docs/attribution.md](https://github.com/tilezen/joerd/blob/master/docs/attribution.md) の "Required attribution":
+
+```
+* ArcticDEM terrain data DEM(s) were created from DigitalGlobe, Inc., imagery and
+  funded under National Science Foundation awards 1043681, 1559691, and 1542736;
+* Australia terrain data © Commonwealth of Australia (Geoscience Australia) 2017;
+* Austria terrain data © offene Daten Österreichs – Digitales Geländemodell (DGM)
+  Österreich;
+* Canada terrain data contains information licensed under the Open Government
+  Licence – Canada;
+* Europe terrain data produced using Copernicus data and information funded by the
+  European Union - EU-DEM layers;
+* Global ETOPO1 terrain data U.S. National Oceanic and Atmospheric Administration
+* Mexico terrain data source: INEGI, Continental relief, 2016;
+* New Zealand terrain data Copyright 2011 Crown copyright (c) Land Information New
+  Zealand and the New Zealand Government (All rights reserved);
+* Norway terrain data © Kartverket;
+* United Kingdom terrain data © Environment Agency copyright and/or database right
+  2015. All rights reserved;
+* United States 3DEP (formerly NED) and global GMTED2010 and SRTM terrain data
+  courtesy of the U.S. Geological Survey.
+```

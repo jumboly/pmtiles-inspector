@@ -259,3 +259,12 @@ tr.selected, tr.selected:hover { background: color-mix(in srgb, var(--sel) 30%, 
 .varint .cont { color: var(--c-col-offset); font-weight: 700; }
 .varint .stop { color: var(--c-col-runLength); font-weight: 700; }
 .dec-hex { max-height: 320px; }
+
+/* ---- credits ---- */
+.credits { padding: 0 16px 24px; font-size: 12px; color: var(--dim); }
+.credits summary { cursor: pointer; }
+.credits dl { margin: 8px 0 0; }
+.credits dt { font-weight: 600; color: var(--text); margin-top: 8px; }
+.credits dd { margin: 2px 0 0 12px; }
+.credits ul { margin: 4px 0; padding-left: 18px; }
+.credits a { color: var(--accent); }
