@@ -106,3 +106,21 @@ function assertZoom(z: number) {
     throw new RangeError(`z は 0..${MAX_ZOOM} の整数です (z=${z})`);
   }
 }
+
+/**
+ * (x, y) を含む、ズーム z 上の 2^k × 2^k の整列ブロック。
+ *
+ * Hilbert 曲線は「大きい象限から順に辿る」ので、整列ブロックの中のタイルは必ず連続した TileID を持つ。
+ * 先頭の Hilbert index は、1 段粗いグリッド（ズーム z-k）でのブロックの Hilbert index × (2^k)^2 になる。
+ * 地理的に近いタイルが TileID でも近くなりやすい理由そのもの。
+ */
+export function alignedBlock(z: number, x: number, y: number, k: number) {
+  assertZoom(z);
+  if (!Number.isInteger(k) || k < 0 || k > z) throw new RangeError(`k は 0..${z} の整数です (k=${k})`);
+  const size = 2 ** k;
+  const bx = Math.floor(x / size);
+  const by = Math.floor(y / size);
+  const firstHilbertIndex = hilbertXyToIndex(z - k, bx, by) * size * size;
+  const firstTileId = zoomBase(z) + firstHilbertIndex;
+  return { x0: bx * size, y0: by * size, size, firstHilbertIndex, firstTileId, lastTileId: firstTileId + size * size - 1 };
+}

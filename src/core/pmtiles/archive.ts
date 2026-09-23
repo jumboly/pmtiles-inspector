@@ -69,6 +69,25 @@ export type TraceStep =
       error?: string;
     };
 
+/** z/x/y → Tile Entry までの手順（I/O は directory の read だけ。tile data は読まない） */
+export type LookupStep = Extract<TraceStep, { kind: "address" | "zoom-check" | "directory" }>;
+
+/**
+ * lookup の結論。found の fileOffset / length は「これから読むべき範囲」であり、まだ読んでいない。
+ * Tile Addressing（どこにあるか）と Physical Read（実際に読む）を別の段階として見せるために分けている。
+ */
+export type LookupResult =
+  | { status: "found"; entry: Entry; fileOffset: number; length: number }
+  | { status: "not-found" }
+  | { status: "out-of-zoom" }
+  | { status: "error"; message: string };
+
+export interface TileLookup {
+  address: TileAddress;
+  steps: LookupStep[];
+  result: LookupResult;
+}
+
 export type TraceResult =
   | { status: "found"; entry: Entry; raw: Uint8Array; payload?: Uint8Array }
   | { status: "not-found" }
@@ -153,6 +172,14 @@ export class PmtilesArchive {
     return rec;
   }
 
+  /**
+   * 読み込み済みの leaf の数。Viewer が「leaf が増えたので描き直す」を判定するのに使う。
+   * read の通知（TracingByteSource）は leaf をキャッシュに入れる前に届くため、それでは代用できない。
+   */
+  get loadedLeafCount(): number {
+    return this.dirCache.size;
+  }
+
   /** すでに読んである leaf を I/O なしで返す。Directory Viewer がツリーの「展開済み」を判定するのに使う */
   peekLeafDirectory(entry: Entry): DirectoryRecord | undefined {
     return this.dirCache.get(this.leafKey(entry));
@@ -193,11 +220,14 @@ export class PmtilesArchive {
     return { record, cached: false };
   }
 
-  /** z/x/y を起点に、Root → Leaf → Tile の全過程を記録しながらタイルを取得する */
-  async traceTile(z: number, x: number, y: number): Promise<TileTrace> {
+  /**
+   * z/x/y から Tile Entry を探す（Root → Leaf の探索まで）。
+   * 必要な leaf directory は読む（探索に不可欠なため）が、tile data は読まない。
+   */
+  async lookupTile(z: number, x: number, y: number): Promise<TileLookup> {
     const address = zxyToTileId(z, x, y);
-    const steps: TraceStep[] = [{ kind: "address", address }];
-    const done = (result: TraceResult): TileTrace => ({ address, steps, result });
+    const steps: LookupStep[] = [{ kind: "address", address }];
+    const done = (result: LookupResult): TileLookup => ({ address, steps, result });
 
     const h = this.header;
     const inRange = z >= h.minZoom && z <= h.maxZoom;
@@ -215,7 +245,7 @@ export class PmtilesArchive {
         if (!entry) return done({ status: "not-found" });
 
         if (entry.runLength > 0) {
-          return done(await this.readTile(entry, steps));
+          return done({ status: "found", entry, fileOffset: h.tileDataOffset + entry.offset, length: entry.length });
         }
         const leaf = await this.readLeafDirectory(entry);
         dir = leaf.record;
@@ -225,6 +255,15 @@ export class PmtilesArchive {
     } catch (e) {
       return done({ status: "error", message: e instanceof Error ? e.message : String(e) });
     }
+  }
+
+  /** z/x/y を起点に、Root → Leaf → Tile の全過程を記録しながらタイルを取得する（lookup + tile の read） */
+  async traceTile(z: number, x: number, y: number): Promise<TileTrace> {
+    const lookup = await this.lookupTile(z, x, y);
+    const steps: TraceStep[] = [...lookup.steps];
+    const r = lookup.result;
+    const result = r.status === "found" ? await this.readTile(r.entry, steps) : r;
+    return { address: lookup.address, steps, result };
   }
 
   private async readTile(entry: Entry, steps: TraceStep[]): Promise<TraceResult> {

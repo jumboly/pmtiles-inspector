@@ -76,3 +76,35 @@ export function findTileTraced(entries: readonly Entry[], target: number): Searc
   }
   return { target, steps, candidateIndex: high, outcome: "outside-run" };
 }
+
+/**
+ * target 以下で最大の tileId を持つ entry の index（無ければ -1）。
+ * findTileTraced と同じ探索だが過程を記録しない。Hilbert Viewer が数万タイルを一度に分類するときに使う。
+ */
+export function floorEntryIndex(entries: readonly Entry[], target: number): number {
+  let low = 0;
+  let high = entries.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    const t = entries[mid]!.tileId;
+    if (t < target) low = mid + 1;
+    else if (t > target) high = mid - 1;
+    else return mid;
+  }
+  return high;
+}
+
+/**
+ * entry が担当する TileID の半開区間 [start, end)。
+ *
+ * - tile entry: tileId から runLength 個
+ * - leaf entry: 次の entry の tileId の手前まで。entry 自体は終端を持たないので、最後の entry は
+ *   親 directory から受け継いだ上限（root なら無限）までになる。
+ *   これは findTile が leaf entry に範囲チェックをしないことの裏返し。
+ */
+export function entryTileIdRange(entries: readonly Entry[], index: number, upper = Infinity): { start: number; end: number } {
+  const e = entries[index]!;
+  if (e.runLength > 0) return { start: e.tileId, end: e.tileId + e.runLength };
+  const next = entries[index + 1];
+  return { start: e.tileId, end: next ? next.tileId : upper };
+}

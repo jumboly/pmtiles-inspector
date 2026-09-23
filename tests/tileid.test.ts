@@ -1,6 +1,6 @@
 import { tileIdToZxy as officialTileIdToZxy, zxyToTileId as officialZxyToTileId } from "pmtiles";
 import { describe, expect, it } from "vitest";
-import { tileIdToZxy, zxyToTileId, zoomBase } from "../src/core/pmtiles/tileid";
+import { alignedBlock, tileIdToZxy, zxyToTileId, zoomBase } from "../src/core/pmtiles/tileid";
 
 describe("TileID", () => {
   it("spec §4.1 の表と一致する", () => {
@@ -57,5 +57,25 @@ describe("TileID", () => {
     expect(() => zxyToTileId(27, 0, 0)).toThrow();
     expect(() => zxyToTileId(2, 4, 0)).toThrow();
     expect(() => zxyToTileId(2, -1, 0)).toThrow();
+  });
+
+  it("整列ブロック内の TileID は連続区間になる（Hilbert の局所性）", () => {
+    for (let z = 1; z <= 7; z++) {
+      for (let k = 0; k <= z; k++) {
+        const n = 2 ** z;
+        const size = 2 ** k;
+        for (let bx = 0; bx < n; bx += size) {
+          for (let by = 0; by < n; by += size) {
+            const blk = alignedBlock(z, bx, by, k);
+            const ids: number[] = [];
+            for (let x = bx; x < bx + size; x++) for (let y = by; y < by + size; y++) ids.push(zxyToTileId(z, x, y).tileId);
+            ids.sort((a, b) => a - b);
+            expect(ids[0]).toBe(blk.firstTileId);
+            expect(ids.at(-1)).toBe(blk.lastTileId);
+            expect(ids.at(-1)! - ids[0]!).toBe(ids.length - 1);
+          }
+        }
+      }
+    }
   });
 });

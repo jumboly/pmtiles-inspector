@@ -29,6 +29,12 @@
   --c-col-length: #e09a1a;
   --c-col-offset: #d9534f;
 
+  /* Hilbert Viewer で leaf の担当範囲を塗り分ける 4 色。隣接ペアで色覚特性シミュレーション込みの識別性を検証済み */
+  --c-region-1: #2a78d6;
+  --c-region-2: #eb6834;
+  --c-region-3: #1baf7a;
+  --c-region-4: #eda100;
+
   --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
 }
@@ -54,6 +60,10 @@
     --c-col-runLength: #3cc48f;
     --c-col-length: #f0b43c;
     --c-col-offset: #ff7a75;
+    --c-region-1: #3987e5;
+    --c-region-2: #d95926;
+    --c-region-3: #199e70;
+    --c-region-4: #c98500;
   }
 }
 
@@ -81,12 +91,17 @@ button.primary { background: var(--accent); color: #fff; border-color: transpare
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
   grid-template-areas:
     "layout layout"
+    "trace trace"
+    "hilbert search"
     "header hex"
     "dir dir"
     "enc enc"
     "meta reads";
 }
 #p-dir { grid-area: dir; }
+#p-trace { grid-area: trace; }
+#p-hilbert { grid-area: hilbert; }
+#p-search { grid-area: search; }
 #p-enc { grid-area: enc; }
 #p-layout { grid-area: layout; }
 #p-header { grid-area: header; }
@@ -94,7 +109,7 @@ button.primary { background: var(--accent); color: #fff; border-color: transpare
 #p-meta { grid-area: meta; }
 #p-reads { grid-area: reads; }
 @media (max-width: 900px) {
-  .grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "layout" "header" "hex" "dir" "enc" "meta" "reads"; }
+  .grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "layout" "trace" "hilbert" "search" "header" "hex" "dir" "enc" "meta" "reads"; }
 }
 
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; min-width: 0; display: flex; flex-direction: column; }
@@ -103,6 +118,7 @@ button.primary { background: var(--accent); color: #fff; border-color: transpare
 .panel .body { padding: 10px 12px; overflow: auto; min-height: 0; }
 #p-header .body, #p-hex .body { max-height: 620px; }
 #p-meta .body, #p-reads .body { max-height: 420px; }
+#p-search .body { max-height: 760px; }
 #p-meta .body.selected { outline: 2px solid var(--sel); outline-offset: -2px; }
 
 table { border-collapse: collapse; width: 100%; }
@@ -268,3 +284,58 @@ tr.selected, tr.selected:hover { background: color-mix(in srgb, var(--sel) 30%, 
 .credits dd { margin: 2px 0 0 12px; }
 .credits ul { margin: 4px 0; padding-left: 18px; }
 .credits a { color: var(--accent); }
+
+/* ---- tile trace ---- */
+.trace-form { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 10px; }
+.trace-form input { width: 6em; font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
+.trace-form input[name="TileID"] { width: 11em; }
+.trace-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.trace-steps { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 0; padding: 0; margin: 0 0 10px; }
+.trace-steps li { display: flex; align-items: center; }
+.trace-steps .arrow { color: var(--dim); padding: 0 4px; }
+.trace-step { display: flex; flex-direction: column; align-items: flex-start; padding: 4px 10px; text-align: left; background: var(--bg); }
+.trace-step b { font-size: 12px; }
+.trace-step span { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+.trace-step.todo { opacity: 0.55; }
+.trace-step.current { background: color-mix(in srgb, var(--sel) 35%, transparent); border-color: var(--sel); }
+.trace-step.current span { color: var(--text); }
+.trace-step.k-directory { border-left: 3px solid var(--c-leaf); }
+.trace-step.k-result { border-left: 3px solid var(--c-target); }
+.trace-detail { padding: 8px 12px; border-left: 3px solid var(--sel); background: color-mix(in srgb, var(--sel) 10%, transparent); border-radius: 0 6px 6px 0; }
+.trace-detail p { margin: 6px 0 0; }
+.io { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.io .arrow { color: var(--dim); }
+
+/* ---- hilbert viewer ---- */
+.hilbert-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-bottom: 8px; }
+.note-inline { font-size: 12px; color: var(--dim); flex-basis: 100%; }
+.hilbert-layout { display: grid; grid-template-columns: minmax(0, 512px) minmax(200px, 1fr); gap: 12px; align-items: start; }
+/* パネル幅で切り替える（画面幅ではなく）。grid 配置によってパネルの幅が変わるため */
+#p-hilbert .body { container-type: inline-size; }
+@container (max-width: 820px) { .hilbert-layout { grid-template-columns: minmax(0, 1fr); } }
+.hilbert-canvas-wrap { max-width: 512px; }
+.hilbert-canvas { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; cursor: crosshair; image-rendering: pixelated; }
+.addr-dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 4px 0 10px; }
+.addr-dl dt { color: var(--dim); white-space: nowrap; }
+.addr-dl dd { margin: 0; }
+.strong { font-weight: 700; }
+.hilbert-legend { display: flex; flex-direction: column; gap: 3px; font-size: 12px; padding: 8px 10px; background: var(--bg); border-radius: 6px; }
+.hilbert-legend .swatch { margin-right: 2px; }
+.hilbert-legend .swatch:last-of-type { margin-right: 6px; }
+
+/* ---- directory search ---- */
+.seg-tabs { display: inline-flex; gap: 4px; margin-bottom: 8px; }
+.seg-tabs button.on { background: color-mix(in srgb, var(--sel) 35%, transparent); border-color: var(--sel); font-weight: 600; }
+.search h3 { font-size: 12px; margin: 14px 0 6px; }
+.search h3 .dim { font-weight: normal; margin-left: 6px; }
+.search-steps, .search-neigh { font-size: 12px; }
+.range-bar { position: relative; height: 8px; margin-top: 3px; min-width: 120px; background: var(--bg); border-radius: 2px; }
+.range-live { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 2px; }
+.range-mid { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: var(--text); }
+.cmp-equal { font-weight: 700; }
+.search-neigh tr.target-row td { color: var(--c-target); font-weight: 600; border-bottom-style: dashed; }
+.search-neigh tr.leaf-row td:first-child { box-shadow: inset 3px 0 var(--c-leaf); }
+.judge { display: flex; flex-direction: column; gap: 4px; }
+.judge .rule { padding: 4px 8px; border-radius: 6px; color: var(--dim); border: 1px solid var(--line); }
+.judge .rule.on { color: var(--text); border-color: var(--sel); background: color-mix(in srgb, var(--sel) 18%, transparent); }
+.judge .verdict { font-weight: 700; }

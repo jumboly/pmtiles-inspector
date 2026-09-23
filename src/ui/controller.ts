@@ -5,6 +5,7 @@ import { LocalFileSource } from "../core/source/local-file-source";
 import { TracingByteSource } from "../core/source/tracing-byte-source";
 import type { ByteSource } from "../core/source/types";
 import { isPlainDirectory } from "./directory-util";
+import { buildTraceSteps } from "./trace-steps";
 import type { AppState, DirColumn, DirView, HexWindow } from "./state";
 import type { Store } from "./store";
 
@@ -12,6 +13,15 @@ import type { Store } from "./store";
 export const HEX_PAGE_SIZE = 4096;
 /** Directory Viewer の 1 ページの entry 数。leaf は 4096 entry 程度になるので全行は描かない */
 export const DIR_PAGE_SIZE = 200;
+/** Auto 再生の 1 段あたりの時間。各パネルの連動を目で追える程度に遅くする */
+const TRACE_AUTO_INTERVAL_MS = 1200;
+/**
+ * Hilbert Viewer が 1 画面に描くのは最大 2^8 × 2^8 マス。
+ * これより高いズームでは、選択タイルを含む整列ブロック（= TileID が連続する区間）だけを描く。
+ */
+export const HILBERT_MAX_WINDOW_ZOOM = 8;
+/** Hilbert 曲線を既定で重ねる上限。これより細かいと線が面を塗りつぶして grid が読めなくなる */
+const CURVE_DEFAULT_MAX_ZOOM = 6;
 
 /**
  * ユーザ操作を store の変更に変換する唯一の場所。
@@ -19,6 +29,8 @@ export const DIR_PAGE_SIZE = 200;
  */
 export class Controller {
   private openSeq = 0;
+  private traceSeq = 0;
+  private playTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(private readonly store: Store<AppState>) {}
 
@@ -28,6 +40,7 @@ export class Controller {
 
   async open(inner: ByteSource) {
     const seq = ++this.openSeq;
+    this.stopTrace();
     const source = new TracingByteSource(inner);
     this.store.set({
       status: "loading",
@@ -43,6 +56,9 @@ export class Controller {
       dirView: undefined,
       dirLoading: undefined,
       dirError: undefined,
+      trace: undefined,
+      traceLoading: undefined,
+      traceError: undefined,
     });
     // read が起きるたびに Range Trace を更新する。後から別ファイルを開いたら古い通知は捨てる
     source.subscribe(() => {
@@ -60,6 +76,8 @@ export class Controller {
         hex: { baseOffset: 0, bytes: archive.firstRead.bytes, origin: "first-read" },
         // root は先頭 16 KiB に含まれていて読み終わっているので、開いた時点で見せる（追加 I/O なし）
         dirView: { dir: archive.root, trail: [], page: 0 },
+        // leaf の分割は最大ズーム付近で最もよく見えるので、描ける範囲で最大のズームから始める
+        ...hilbertZoomPatch(Math.min(archive.header.maxZoom, HILBERT_MAX_WINDOW_ZOOM)),
       });
     } catch (e) {
       if (seq === this.openSeq) this.store.set({ status: "error", error: message(e) });
@@ -171,6 +189,93 @@ export class Controller {
   }
 
   /**
+   * z/x/y から Tile Entry までを辿る。
+   * 探索に必要な leaf は読む（Read Trace に残る）が、tile data は読まない。
+   */
+  async traceTile(z: number, x: number, y: number) {
+    const archive = this.store.get().archive;
+    if (!archive) return;
+    const seq = ++this.traceSeq;
+    this.stopTrace();
+    this.store.set({ traceLoading: `${z}/${x}/${y} を探索中…`, traceError: undefined });
+    try {
+      const lookup = await archive.lookupTile(z, x, y);
+      if (seq !== this.traceSeq || this.store.get().archive !== archive) return;
+      const steps = buildTraceSteps(lookup);
+      const zoomPatch = z === this.store.get().hilbertZoom ? {} : hilbertZoomPatch(z);
+      this.store.set({ trace: { lookup, step: steps.length - 1 }, traceLoading: undefined, ...zoomPatch });
+      this.traceStep(steps.length - 1);
+    } catch (e) {
+      // z/x/y の範囲外など、lookup を始める前の入力エラー
+      if (seq === this.traceSeq) this.store.set({ traceLoading: undefined, traceError: message(e) });
+    }
+  }
+
+  /**
+   * Trace の段を移動し、その段に関係する directory / entry を他パネルでも選択状態にする。
+   * 既存の selection の仕組みに乗せることで、Directory・Encoding・Hex・File Layout が追加実装なしで連動する。
+   */
+  traceStep(index: number) {
+    const trace = this.store.get().trace;
+    if (!trace) return;
+    const steps = buildTraceSteps(trace.lookup);
+    const step = Math.min(Math.max(index, 0), steps.length - 1);
+    const patch: Partial<AppState> = { trace: { ...trace, step } };
+
+    // この段までに通った directory の連なり（Directory Viewer のパンくず = trail になる）
+    const trail: DirView["trail"] = [];
+    let current: { dir: DirectoryRecord; index?: number } | undefined;
+    for (const s of steps.slice(0, step + 1)) {
+      if (s.kind !== "directory") continue;
+      if (current?.index !== undefined) trail.push({ dir: current.dir, index: current.index });
+      current = { dir: s.step.directory, index: s.step.search.candidateIndex };
+    }
+    if (current) {
+      const { dir, index: i } = current;
+      patch.dirView = { dir, trail, page: i !== undefined ? Math.floor(i / DIR_PAGE_SIZE) : 0 };
+      patch.selection = i !== undefined ? { kind: "dir-entry", dir, index: i } : { kind: "directory", dir };
+      patch.hex = dirHex(dir);
+      patch.dirError = undefined;
+    } else {
+      // directory に入る前の段（z/x/y → TileID の計算）では、まだファイル上のどこも指していないことを見せる
+      patch.selection = undefined;
+    }
+    this.store.set(patch);
+  }
+
+  /** 先頭の段から自動で進める。最後の段に着いたら止まる */
+  playTrace() {
+    const trace = this.store.get().trace;
+    if (!trace) return;
+    this.stopTrace();
+    const last = buildTraceSteps(trace.lookup).length - 1;
+    this.traceStep(0);
+    this.store.set({ tracePlaying: true });
+    this.playTimer = setInterval(() => {
+      const t = this.store.get().trace;
+      if (!t || t.step >= last) {
+        this.stopTrace();
+        return;
+      }
+      this.traceStep(t.step + 1);
+    }, TRACE_AUTO_INTERVAL_MS);
+  }
+
+  stopTrace() {
+    if (this.playTimer !== undefined) clearInterval(this.playTimer);
+    this.playTimer = undefined;
+    if (this.store.get().tracePlaying) this.store.set({ tracePlaying: false });
+  }
+
+  setHilbertZoom(z: number) {
+    this.store.set(hilbertZoomPatch(z));
+  }
+
+  setHilbertCurve(on: boolean) {
+    this.store.set({ hilbertCurve: on });
+  }
+
+  /**
    * section 内をページ送りする。
    * 先頭 16 KiB に掛かる部分は手元の first read をそのまま見せ、その先だけを追加で読む。
    */
@@ -206,6 +311,11 @@ export class Controller {
     const r = await source.read(start, end - start, { purpose: "viewer-inspect", label: `hex: ${section.name}` });
     this.store.set({ hex: { baseOffset: start, bytes: r.bytes, origin: "viewer-inspect", section } });
   }
+}
+
+/** ズームを変えたら曲線の表示も既定に戻す。低ズームで消したまま高ズームへ行く等の迷いを減らすため */
+function hilbertZoomPatch(z: number): Pick<AppState, "hilbertZoom" | "hilbertCurve"> {
+  return { hilbertZoom: z, hilbertCurve: z <= CURVE_DEFAULT_MAX_ZOOM };
 }
 
 /**

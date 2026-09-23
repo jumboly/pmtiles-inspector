@@ -93,3 +93,21 @@ Raster Inspector が失敗して Raw Inspector に fallback する例として�
 - `leaf_z8_nocomp.pmtiles`（`scripts/make-uncompressed-fixture.py`）: `leaf_z8` の Internal Compression を none にしたもの。
   leaf は解凍しただけで再符号化していない。leaf が大きくなって offset が伸びるため、root は 58 B → 77 B に増える。
   Go CLI の `pmtiles verify` と、公式 JS reader による全タイル比較テストで正しさを確認
+
+## Phase 3 で分かったこと
+
+- **Tile Addressing と Physical Read を分けた**: `lookupTile(z, x, y)` は Tile Entry とファイル上の範囲
+  （`tileDataOffset + entry.offset`, `entry.length`）を返すまでで、tile data は読まない。
+  探索に必要な leaf だけは読む。`traceTile` は `lookupTile` + tile の read で、公式 `getZxy` との比較テストはこちらで継続
+- **整列ブロックと TileID の連続性**: ズーム z の 2^k × 2^k の整列ブロック内のタイルは、必ず連続した TileID 区間になる。
+  先頭は `zoomBase(z) + xy2d(z-k, x>>k, y>>k) × 4^k`。z1〜7 の全ブロックでテスト済み。
+  Hilbert Viewer は z > 8 でこの性質を使い、選択タイルを含む 256×256 のブロックだけを描く
+- **leaf entry の担当範囲**: 公式 `findTile` は leaf entry に対して範囲チェックをしない。
+  leaf entry の担当は「次の entry の TileID の手前まで」で、最後の entry は親から受け継いだ上限まで。
+  `entryTileIdRange` はこの規則で区間を返し、公式 `findTile` の hit 判定と一致することをテストした
+- `leaf_z8` の root は leaf entry 11 個（4096 entries ずつ）。Hilbert grid（z8）で塗り分けると、
+  各 leaf は地図上でひとかたまりの領域になる。leaf #0 は z0〜7 の全タイルと z8 の先頭部分を持つ
+- binary search の比較回数は `⌈log2(n+1)⌉` 回以下（root 11 entries → 最大 4 回、leaf 4096 entries → 最大 13 回）
+- 実装上の注意: TracingByteSource の read 通知は、archive が leaf をキャッシュに入れる**前**に届く。
+  「leaf が読み込まれた」を知りたい Viewer は read の件数ではなく `archive.loadedLeafCount` を見る
+

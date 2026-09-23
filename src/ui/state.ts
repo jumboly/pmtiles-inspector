@@ -1,4 +1,4 @@
-import type { DirectoryRecord, MetadataRecord, PmtilesArchive } from "../core/pmtiles/archive";
+import type { DirectoryRecord, MetadataRecord, PmtilesArchive, TileLookup } from "../core/pmtiles/archive";
 import type { HeaderKey, SectionName } from "../core/pmtiles/header";
 import type { FileLayout } from "../core/pmtiles/layout";
 import type { ReadRecord, TracingByteSource } from "../core/source/tracing-byte-source";
@@ -40,6 +40,13 @@ export interface HexWindow {
   section?: { name: SectionName; offset: number; length: number };
 }
 
+/** Tile Trace の結果と、いま何段目を見ているか。Previous / Next はこの step を動かすだけ */
+export interface TraceView {
+  lookup: TileLookup;
+  /** buildTraceSteps(lookup) の index */
+  step: number;
+}
+
 export interface AppState {
   status: "idle" | "loading" | "ready" | "error";
   error?: string;
@@ -55,6 +62,15 @@ export interface AppState {
   /** leaf を読み込み中・失敗したときの表示用 */
   dirLoading?: string;
   dirError?: string;
+  trace?: TraceView;
+  traceLoading?: string;
+  traceError?: string;
+  /** Auto 再生中か */
+  tracePlaying?: boolean;
+  /** Hilbert Viewer が描いているズーム */
+  hilbertZoom: number;
+  /** Hilbert 曲線を重ねるか。高ズームでは線が密になりすぎて grid が読めなくなるため切り替え可能にする */
+  hilbertCurve: boolean;
 }
 
-export const initialState: AppState = { status: "idle", reads: [] };
+export const initialState: AppState = { status: "idle", reads: [], hilbertZoom: 0, hilbertCurve: true };

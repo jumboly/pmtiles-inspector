@@ -2,7 +2,7 @@ import { findTile, PMTiles, SharedPromiseCache } from "pmtiles";
 import { describe, expect, it } from "vitest";
 import { PmtilesArchive } from "../src/core/pmtiles/archive";
 import type { Entry } from "../src/core/pmtiles/directory";
-import { findTileTraced } from "../src/core/pmtiles/lookup";
+import { entryTileIdRange, findTileTraced, floorEntryIndex } from "../src/core/pmtiles/lookup";
 import { tileIdToZxy } from "../src/core/pmtiles/tileid";
 import { TracingByteSource } from "../src/core/source/tracing-byte-source";
 import { allDirectories, FIXTURES, officialSource, ourSource } from "./helpers";
@@ -37,6 +37,22 @@ describe("findTileTraced vs 公式 findTile", () => {
       for (let t = Math.max(0, first - 3); t <= last.tileId + Math.max(last.runLength, 1) + 3; t++) {
         const ours = findTileTraced(entries, t);
         expect(ours.entry ?? null).toEqual(findTile(entries as Entry[], t));
+      }
+    }
+  });
+
+  it("floorEntryIndex は findTileTraced の候補と一致し、entryTileIdRange は findTile の hit 範囲と一致する", async () => {
+    const archive = await PmtilesArchive.open(await ourSource(FIXTURES.leaf));
+    for (const d of await allDirectories(archive)) {
+      const entries = d.decoded.entries;
+      const last = entries.at(-1)!;
+      for (let t = Math.max(0, entries[0]!.tileId - 2); t <= last.tileId + Math.max(last.runLength, 1) + 2; t++) {
+        const i = floorEntryIndex(entries, t);
+        expect(i).toBe(findTileTraced(entries, t).candidateIndex ?? -1);
+        if (i >= 0 && entries[i]!.runLength > 0) {
+          const r = entryTileIdRange(entries, i);
+          expect(t >= r.start && t < r.end).toBe(findTile(entries as Entry[], t) !== null);
+        }
       }
     }
   });
@@ -76,6 +92,23 @@ describe("traceTile vs 公式 getZxy", () => {
       }
     }, 120_000);
   }
+});
+
+describe("lookupTile", () => {
+  it("leaf fixture: Tile Entry まで辿り、tile data は読まない。entry は公式 getZxy の有無と一致する", async () => {
+    const src = new TracingByteSource(await ourSource(FIXTURES.leaf));
+    const archive = await PmtilesArchive.open(src);
+    const official = new PMTiles(await officialSource(FIXTURES.leaf));
+    for (const [z, x, y] of [[8, 200, 100], [6, 0, 5], [3, 1, 1], [0, 0, 0], [8, 0, 0]] as const) {
+      const [l, t] = await Promise.all([archive.lookupTile(z, x, y), official.getZxy(z, x, y)]);
+      expect(l.result.status === "found").toBe(!!t);
+      if (l.result.status === "found") {
+        expect(l.result.fileOffset).toBe(archive.header.tileDataOffset + l.result.entry.offset);
+        expect(l.result.length).toBe(l.result.entry.length);
+      }
+    }
+    expect(src.records.some((r) => r.purpose === "tile-data")).toBe(false);
+  });
 });
 
 describe("Read trace", () => {

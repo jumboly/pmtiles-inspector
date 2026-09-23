@@ -3,6 +3,7 @@
 PMTiles v3 の内部構造を「使う」ためではなく「理解する」ための Viewer です。
 Header・File Layout・Root / Leaf Directory・Directory Encoding（列指向 / 差分 / varint）を、
 生 bytes と論理値を対応付けながら確認できます。
+Tile Trace では z/x/y → Hilbert position → TileID → Root / Leaf の binary search → Tile Entry を 1 段ずつ追えます。
 
 公開版: https://www.jumboly.jp/pmtiles-inspector/
 
