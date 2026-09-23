@@ -23,6 +23,8 @@ const SAMPLES = [
 const REMOTE_SAMPLES = [
   { url: "https://r2-public.protomaps.com/protomaps-sample-datasets/terrarium_z9.pmtiles", label: "Terrarium PNG 全球 z0-9 (28.4 GiB)" },
   { url: "https://r2-public.protomaps.com/protomaps-sample-datasets/overture-pois.pmtiles", label: "Overture POI MVT z0-14 (4.34 GiB)" },
+  // 道路・建物・水域など geometry の種類が揃った MVT。Content Inspector で LineString / 穴あき Polygon を見るため（pmtiles.io = GitHub Pages なので CORS 可）
+  { url: "https://pmtiles.io/protomaps(vector)ODbL_firenze.pmtiles", label: "Protomaps basemap Firenze MVT z0-15 (6.3 MiB)" },
 ];
 
 /** select の value に「どう開くか」を埋め込む。同じファイルを Local と HTTP で開き比べられるようにするため */

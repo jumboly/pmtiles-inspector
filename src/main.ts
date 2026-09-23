@@ -1,5 +1,6 @@
 import "./ui/styles.css";
 import { Controller } from "./ui/controller";
+import { mountContentInspector } from "./ui/panels/content-inspector";
 import { mountDirectoryViewer } from "./ui/panels/directory-viewer";
 import { mountEncodingViewer } from "./ui/panels/encoding-viewer";
 import { mountFileLayout } from "./ui/panels/file-layout";
@@ -26,6 +27,7 @@ mountMapView(body("p-map"), store, ctl);
 mountFileLayout(body("p-layout"), store, ctl);
 mountTileTrace(body("p-trace"), store, ctl);
 mountTilePayload(body("p-payload"), store, ctl);
+mountContentInspector(body("p-content"), store, ctl);
 mountHilbertViewer(body("p-hilbert"), store, ctl);
 mountSearchViewer(body("p-search"), store, ctl);
 mountHeaderInspector(body("p-header"), store, ctl);

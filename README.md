@@ -11,6 +11,11 @@ Map（MapLibre GL JS）には archive の中身とタイル境界・z/x/y を重
 Trace の段に合わせて、候補の leaf が担当する TileID 区間を地図上の面として表示し、地図と Hilbert Viewer の間でカーソル位置も連動します。
 背景地図には [MapLibre demotiles](https://demotiles.maplibre.org/) を使っています。
 
+Tile Payload の先は Content Inspector（PMTiles とは独立に bytes だけを受け取る）に渡します。
+MVT は自前の protobuf reader で layer / feature / properties / geometry（command integer → MoveTo / LineTo / ClosePath → tile 座標、ring の外周 / 穴）まで decode し、
+各値が Payload のどの byte から来たかを保持します。地図をクリックすると、その地点の feature を選んで地図・tile プレビュー・Payload の dump で強調します。
+Raster（PNG / JPEG / WebP / AVIF）は header から寸法を読み、ブラウザが decode した画像と突き合わせます。どちらにも当てはまらない tile は Raw Inspector に fallback します。
+
 ローカルファイル（`Blob.slice`）のほか、URL の archive を HTTP Range Request で開けます。
 Read Trace では各 read の request（Range ヘッダ）と response（status・ヘッダ・CORS で読めなかったヘッダ）を確認でき、
 CORS / Range 非対応 / mixed content などで開けなかった場合は原因と確認方法を表示します。
@@ -24,7 +29,7 @@ CORS / Range 非対応 / mixed content などで開けなかった場合は原�
 ```sh
 npm ci
 npm run dev    # http://localhost:5173
-npm test       # 公式 pmtiles JS 実装を Reference Oracle とした比較テスト
+npm test       # 公式 pmtiles JS 実装・@mapbox/vector-tile を Reference Oracle とした比較テスト
 npm run build
 ```
 
@@ -43,8 +48,11 @@ main に push すると GitHub Actions がテスト・ビルドを行い、GitHu
 | `test_fixture_*.pmtiles`, `invalid*.pmtiles` | [protomaps/PMTiles](https://github.com/protomaps/PMTiles) の `js/test/data` より。`test_fixture_mlt` の metadata には © OpenStreetMap contributors / © Overture Maps Foundation の帰属表示が含まれる |
 | `leaf_z8.pmtiles`, `leaf_z8_nocomp.pmtiles` | `scripts/` で生成した合成データ |
 
-リモートのサンプル（`r2-public.protomaps.com` の `terrarium_z9.pmtiles` / `overture-pois.pmtiles`）は同梱せず、
-画面から HTTP Range Request で読みます。Terrarium は上記と同じ Terrain Tiles、Overture POI は Overture Maps Foundation の Places データです。
+`tests/data/images/` は Raster Inspector のテスト用に `scripts/make-image-samples.py` で生成した 37 × 23 の画像です。
+
+リモートのサンプル（`r2-public.protomaps.com` の `terrarium_z9.pmtiles` / `overture-pois.pmtiles`、`pmtiles.io` の Firenze）は同梱せず、
+画面から HTTP Range Request で読みます。Terrarium は上記と同じ Terrain Tiles、Overture POI は Overture Maps Foundation の Places データ、
+Firenze は © OpenStreetMap contributors（ODbL）の Protomaps basemap です。
 
 ### Terrain Tiles の帰属表示
 

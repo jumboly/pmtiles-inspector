@@ -183,3 +183,49 @@ Raster Inspector が失敗して Raw Inspector に fallback する例として�
 - **leaf の担当区間を地図上の面にする**: TileID の連続区間は、ズームごとに高々 6z 個程度の整列ブロック（2^k × 2^k の正方形）に分解できる（`hilbertRangeBlocks`）。
   Hilbert 曲線が「大きい象限から順に辿る」ことの裏返しで、leaf が地図上でひとかたまりの領域になる理由そのもの
 - 実測: MLT fixture は root に entry が無いので、地図の z0 要求（2 回）は Root を引くだけで「無い」と分かり、tile の read は 0 回
+
+## Phase 7 で分かったこと
+
+- **MVT 2.1 の proto（`mapbox/vector-tile-spec` 2.1 `vector_tile.proto`）を再確認**: Tile.layers = 3、Layer は name 1 / features 2 / keys 3 / values 4 / extent 5（既定 4096）/ version 15、
+  Feature は id 1 / tags 2（packed）/ type 3 / geometry 4（packed）、Value は string 1 / float 2（I32）/ double 3（I64）/ int64 4 / uint64 5 / sint64 6 / bool 7
+  - **int64 の負数は 64bit の 2 の補数として 10 byte の varint になる**。小さい負数を短く書くための型が sint64（zigzag）
+  - field の順序は自由（features が keys / values より前にあってもよい）ので、tags の範囲検査は layer を全部読んでから行う
+- **公式 `@mapbox/vector-tile@3` との差**:
+
+  | 項目 | 公式 | 本実装 |
+  |---|---|---|
+  | packed でない tags / geometry | 読めない（tag 18 = packed だけを見る。`tag === 18` の分岐のみ） | protobuf の規則どおり VARINT の繰り返しも読む |
+  | id が無い feature | `undefined` | 同じ（既定値 0 とは区別する） |
+  | 64bit 整数 | number に丸める | 2^53 を超えるときだけ bigint |
+  | ring の表現 | ClosePath で始点の複製を末尾に足す | 点列 + `closed` フラグ（複製しない） |
+  | MultiPoint | 1 つの点列 | 点ごとに part を分ける |
+  | 壊れた tile | 例外 | 読めた layer までを返し、止まった位置を error に残す |
+
+  zcta_z3 の全 18 タイル（6,527 feature など）で、layer / version / extent / id / type / properties / 頂点列が公式と一致（`tests/mvt.test.ts`）
+- **geometry の cursor は part をまたいで引き継がれる**（MoveTo で原点に戻らない）。2 つ目以降の ring の最初の MoveTo も「前の ring の最後の点」からの差分
+- ring の外周 / 穴は面積の符号で決まる（surveyor's formula、tile 座標の y 下向きで正 = exterior = 画面上で時計回り）。
+  canvas の nonzero 塗りで穴が自然に抜けるのはこの巻き方向の規則のおかげ
+- **Tile Compression が gzip なら、feature の bytes はファイル上に存在しない**: Payload 上の位置はファイル上の位置と対応しないので、
+  「この feature だけを Range Read する」ことはできない。PMTiles が読める最小単位は tile（Tile Entry の offset / length）まで
+- 実データでの内訳（Firenze z14 8704/5972, 87 KB）: roads 47.5 %、buildings 22.1 %（その 97 % が geometry）、pois 16.8 %（geometry は 8 %、大半が properties）。
+  properties は keys / values の辞書を index で引くので、同じ値が多い layer ほど feature あたりの bytes が小さい
+- **地図 ↔ feature の対応は自前の当たり判定**: MapLibre の queryRenderedFeatures は MVT の何番目の feature かを返さない（id も無いことが多い）。
+  クリック地点を tile 内の割合（fx, fy）にして、decode 済みの geometry に点 → 線 → 面の順で当てる。強調表示も自前 decode の座標から GeoJSON を作って重ねる
+  （MapLibre の `["geometry-type"]` は Multi* を単純型で返す仕様なので、MultiPolygon も "Polygon" の filter で描ける）
+
+### Raster header（寸法の位置）
+
+| 形式 | 寸法の位置 | 確認元 |
+|---|---|---|
+| PNG | signature 直後の IHDR data 先頭: width(4, BE) height(4, BE) | PNG spec |
+| JPEG | SOF marker segment: precision(1) height(2, BE) width(2, BE)。SOF の種類で baseline / progressive などが分かる | ITU-T T.81 B.2.2 |
+| WebP lossy | 'VP8 ' chunk の key frame: frame tag(3) + `9D 01 2A` + width(14bit)/scale(2bit) LE + height 同様 | RFC 9649 → RFC 6386 9.1 |
+| WebP lossless | 'VP8L' の signature `0x2F` の後 28bit に (width−1)(14bit)(height−1)(14bit) | RFC 9649 |
+| WebP extended | 'VP8X' flags(1) reserved(3) の後に canvas (width−1)(24bit LE) (height−1)(24bit LE) | RFC 9649 |
+| AVIF | meta / iprp / ipco の ispe（符号化サイズ）→ clap（切り抜き）→ irot（回転）。どの property が主画像かは pitm + ipma | ISO/IEC 23008-12 |
+
+- **AVIF の ispe は表示寸法とは限らない**: macOS の `sips` で 37 × 23 の画像を AVIF にすると、ispe は 38 × 24（AV1 が偶数に揃えた符号化サイズ）で、
+  clap で 37 × 23 に切り抜く。ispe だけを見ると寸法を 1 px ずつ間違える
+- テスト用の画像（`tests/data/images/`）は `scripts/make-image-samples.py` で Pillow / cwebp / sips に作らせた。寸法を 37 × 23（奇数・非正方）にして、
+  width と height の取り違えや「−1」の付け忘れを検出できるようにしている
+- Inspector の選び方は Header の Tile Type を優先し、中身の magic と合わなければ Raw に落とす（解凍と同じく推定で方式を変えない）。Tile Type = unknown のときだけ中身から推定する

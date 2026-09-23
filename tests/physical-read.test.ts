@@ -85,10 +85,10 @@ describe("sniff", () => {
 });
 
 describe("Tile Trace の段構成", () => {
-  it("found なら Tile Entry の後に Range Read → Decompression → Payload が続き、not-found なら付かない", async () => {
+  it("found なら Tile Entry の後に Range Read → Decompression → Payload → Content Inspector が続き、not-found なら付かない", async () => {
     const archive = await PmtilesArchive.open(await ourSource(FIXTURES.leaf));
     const found = await archive.lookupTile(8, 200, 100);
-    expect(buildTraceSteps(found).map((s) => s.kind).slice(-4)).toEqual(["result", "range-read", "tile-decompress", "payload"]);
+    expect(buildTraceSteps(found).map((s) => s.kind).slice(-5)).toEqual(["result", "range-read", "tile-decompress", "payload", "content"]);
     const out = await archive.lookupTile(9, 0, 0);
     expect(buildTraceSteps(out).at(-1)!.kind).toBe("result");
   });

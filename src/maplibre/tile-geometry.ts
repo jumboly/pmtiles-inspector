@@ -36,12 +36,25 @@ export function tileCenter(t: TileXYZ): [number, number] {
 
 /** 経緯度を含むズーム z のタイル。経度は世界の複製を跨いでいても 0..2^z-1 に折り返す */
 export function lngLatToTile(lng: number, latitude: number, z: number): TileXYZ {
+  const { x, y } = lngLatToTilePoint(lng, latitude, z);
+  return { z, x, y };
+}
+
+/** lngLatToTile に加えて、タイルの中のどこか（タイルの幅を 1 とした割合 fx, fy。左上が 0） */
+export function lngLatToTilePoint(lng: number, latitude: number, z: number): TileXYZ & { fx: number; fy: number } {
   const n = 2 ** z;
   const wrapped = ((((lng + 180) % 360) + 360) % 360) / 360;
   const la = Math.max(-MAX_LAT, Math.min(MAX_LAT, latitude));
   const r = (la * Math.PI) / 180;
-  const fy = (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2;
-  return { z, x: Math.min(n - 1, Math.floor(wrapped * n)), y: Math.max(0, Math.min(n - 1, Math.floor(fy * n))) };
+  const my = (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2;
+  const x = Math.min(n - 1, Math.floor(wrapped * n));
+  const y = Math.max(0, Math.min(n - 1, Math.floor(my * n)));
+  return { z, x, y, fx: wrapped * n - x, fy: my * n - y };
+}
+
+/** タイル内の位置（タイルの幅を 1 とした割合）を経緯度にする。MVT の tile 座標は extent で割ってから渡す */
+export function tilePointToLngLat(t: TileXYZ, fx: number, fy: number): [number, number] {
+  return [lon(t.x + fx, t.z), lat(t.y + fy, t.z)];
 }
 
 type Ring = [number, number][];

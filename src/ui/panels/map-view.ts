@@ -1,4 +1,6 @@
+import type { Feature } from "geojson";
 import type { PmtilesArchive } from "../../core/pmtiles/archive";
+import { featureGeoJson } from "../../maplibre/feature-geojson";
 import { tileIdRangeBlocks, type TileBlock } from "../../core/pmtiles/tileid";
 import type { ReadRecord } from "../../core/source/tracing-byte-source";
 import type { InspectorMap, InspectorMapColors, MapViewInfo } from "../../maplibre/inspector-map";
@@ -39,7 +41,13 @@ export function mountMapView(el: HTMLElement, store: Store<AppState>, ctl: Contr
       replaceChildren(el, info, h("div", { class: "map-wrap" }, canvas), readsLine, noteEl, errorEl);
       map = new InspectorMap(canvas, {
         colors: colors(el),
-        onTileClick: (t) => void ctl.traceTile(t.z, t.x, t.y),
+        onTileClick: (t, at) => {
+          const tr = store.get().trace;
+          const a = tr?.lookup.address;
+          // Trace 中のタイルをもう読んで decode してあるなら、読み直さずに feature だけ選び直す（同じ read を重ねない）
+          if (tr?.content?.kind === "mvt" && a?.z === t.z && a.x === t.x && a.y === t.y) ctl.pickFeature(at);
+          else void ctl.traceTile(t.z, t.x, t.y, at);
+        },
         onTileHover: (t) => ctl.setHoverTile(t ? { ...t, from: "map" } : undefined),
         onView: (v) => {
           view = v;
@@ -67,6 +75,7 @@ export function mountMapView(el: HTMLElement, store: Store<AppState>, ctl: Contr
     const metaSettled = s.metadata !== undefined || s.metadataError !== undefined;
     if (s.archive !== shown && (!s.archive || metaSettled)) void showArchive(s);
     if (s.trace !== prev.trace || s.archive !== prev.archive) void updateSelection(s, s.trace?.lookup !== prev.trace?.lookup);
+    if (s.trace?.content !== prev.trace?.content || s.trace?.contentSel !== prev.trace?.contentSel) void map?.setFeature(selectedFeature(s));
     if (s.hoverTile !== prev.hoverTile) void map?.setHover(s.hoverTile?.from === "hilbert" ? s.hoverTile : undefined);
     if (s.reads !== prev.reads) renderReads(s.reads);
   });
@@ -176,11 +185,24 @@ function regionBlocks(s: AppState): TileBlock[] {
   return tileIdRangeBlocks(a.z, r.start, r.end);
 }
 
+/** Content Inspector で選ばれている feature を、Trace 中のタイルの位置に写した GeoJSON */
+function selectedFeature(s: AppState): Feature | undefined {
+  const t = s.trace;
+  const c = t?.content;
+  const { layer: li, feature: fi } = t?.contentSel ?? {};
+  if (!t || c?.kind !== "mvt" || li === undefined || fi === undefined) return undefined;
+  const layer = c.mvt.layers[li];
+  const f = layer?.features[fi];
+  if (!layer || !f) return undefined;
+  return featureGeoJson(c.geometry(li, fi, f.geometry, f.type), t.lookup.address, layer.extent);
+}
+
 function colors(el: HTMLElement): InspectorMapColors {
   const css = getComputedStyle(el);
   const v = (n: string) => css.getPropertyValue(n).trim();
   return {
     selected: v("--sel"),
+    feature: v("--c-feature"),
     hover: v("--text"),
     region: v("--c-target"),
     grid: v("--dim"),

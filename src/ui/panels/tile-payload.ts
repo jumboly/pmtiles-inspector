@@ -1,12 +1,12 @@
 import type { Header } from "../../core/pmtiles/header";
 import type { TileRead } from "../../core/pmtiles/archive";
 import { Compression, compressionName, TileType, tileTypeName } from "../../core/pmtiles/enums";
-import type { ByteSpan } from "../../core/pmtiles/span";
+import type { ByteSpan } from "../../tile-inspector/span";
 import { sniff, type SniffKind, type SniffResult } from "../../tile-inspector/raw/sniff";
 import type { Controller } from "../controller";
 import { h, replaceChildren } from "../dom";
 import { hexByte, hexOffset, num, rangeText, size } from "../format";
-import type { AppState } from "../state";
+import type { AppState, TraceView } from "../state";
 import type { Store } from "../store";
 import { buildTraceSteps, type PhysicalStepKind } from "../trace-steps";
 
@@ -27,6 +27,7 @@ export function mountTilePayload(el: HTMLElement, store: Store<AppState>, ctl: C
   store.subscribe((s, prev) => {
     if (s.trace !== prev.trace || s.archive !== prev.archive) render(s);
   });
+  let shownFocus: ByteSpan | undefined;
 
   function render(s: AppState) {
     const t = s.trace;
@@ -54,16 +55,37 @@ export function mountTilePayload(el: HTMLElement, store: Store<AppState>, ctl: C
       limit = DUMP_INITIAL;
     }
     const cur = steps[t.step]?.kind;
-    const focus: PhysicalStepKind | undefined = cur === "range-read" || cur === "tile-decompress" || cur === "payload" ? cur : undefined;
+    const focus: PhysicalStepKind | undefined = cur === "range-read" || cur === "tile-decompress" || cur === "payload" || cur === "content" ? cur : undefined;
+    const mark = contentSpan(t);
+    // 選んだ feature が変わったら dump の表示量を戻す（強調位置から少しだけ見せる）
+    if (mark?.offset !== shownFocus?.offset || mark?.length !== shownFocus?.length) {
+      shownFocus = mark;
+      limit = DUMP_INITIAL;
+    }
     const more = () => {
       limit = Math.min(limit * 4, DUMP_MAX);
       render(store.get());
     };
-    replaceChildren(el, payloadView(s.archive.header, tile, focus, limit, more));
+    replaceChildren(el, payloadView(s.archive.header, tile, focus, limit, more, mark));
   }
 }
 
-function payloadView(header: Header, tile: TileRead, focus: PhysicalStepKind | undefined, limit: number, more: () => void) {
+/** Content Inspector で選んでいる feature（無ければ layer）の Payload 上の範囲 */
+function contentSpan(t: TraceView): ContentMark | undefined {
+  const c = t.content;
+  const { layer: li, feature: fi } = t.contentSel;
+  if (c?.kind !== "mvt" || li === undefined) return undefined;
+  const layer = c.mvt.layers[li];
+  const f = fi !== undefined ? layer?.features[fi] : undefined;
+  if (f) return { ...f.span, label: `${layer!.name} #${f.index}` };
+  return layer ? { ...layer.span, label: `layer ${layer.name}` } : undefined;
+}
+
+interface ContentMark extends ByteSpan {
+  label: string;
+}
+
+function payloadView(header: Header, tile: TileRead, focus: PhysicalStepKind | undefined, limit: number, more: () => void, mark: ContentMark | undefined) {
   const rawSniff = sniff(tile.raw);
   const payload = tile.payload;
   const paySniff = payload ? sniff(payload) : undefined;
@@ -82,7 +104,7 @@ function payloadView(header: Header, tile: TileRead, focus: PhysicalStepKind | u
       h("span", { class: "arrow" }, "→"),
       h("div", { class: `step${focus === "payload" ? " focus" : ""}` }, h("b", {}, "Tile Payload"), h("span", {}, payload ? `${num(payload.length)} B` : "—"), h("span", {}, `Tile Type = ${tileTypeName(header.tileType)}`)),
       h("span", { class: "arrow" }, "→"),
-      h("div", { class: "step todo" }, h("b", {}, "Content Inspector"), h("span", {}, "MVT / Raster / Raw"), h("span", {}, "Phase 7")),
+      h("div", { class: `step${focus === "content" ? " focus" : ""}` }, h("b", {}, "Content Inspector"), h("span", {}, "MVT / Raster / Raw"), h("span", {}, mark ? `強調: ${mark.label}` : "下のパネル")),
     ),
     tile.decompressError
       ? h("p", { class: "error" }, `解凍できませんでした: ${tile.decompressError}。Raw Inspector として、ファイル上の bytes だけを表示します。`)
@@ -98,9 +120,11 @@ function payloadView(header: Header, tile: TileRead, focus: PhysicalStepKind | u
         rawSniff,
         compressionVerdict(tile.compression, rawSniff),
         limit,
+        // 無圧縮なら Payload = ファイル上の bytes なので、feature の位置をこちらの列で示せる
+        same ? mark : undefined,
       ),
       payload && !same
-        ? column("Tile Payload（解凍後）", focus === "tile-decompress" || focus === "payload", payload, undefined, paySniff!, tileTypeVerdict(header.tileType, paySniff!), limit)
+        ? column("Tile Payload（解凍後）", focus === "tile-decompress" || focus === "payload" || focus === "content", payload, undefined, paySniff!, tileTypeVerdict(header.tileType, paySniff!), limit, mark)
         : payload
           ? h(
               "div",
@@ -172,27 +196,32 @@ function verdictEl(v: Verdict, sn: SniffResult) {
  * fileBase を持つ列（ファイル上の bytes）は address をファイル上の offset で、持たない列（Payload）は
  * Payload 先頭からの相対位置で描く。解凍後の bytes はファイル上のどこにも存在しないことを address の書式で区別するため。
  */
-function column(title: string, focus: boolean, bytes: Uint8Array, fileBase: number | undefined, sn: SniffResult, v: Verdict, limit: number) {
+function column(title: string, focus: boolean, bytes: Uint8Array, fileBase: number | undefined, sn: SniffResult, v: Verdict, limit: number, mark?: ContentMark) {
   return h(
     "div",
     { class: `payload-col${focus ? " focus" : ""}` },
     h("div", { class: "tree-title" }, title, h("span", { class: "dim" }, ` ${num(bytes.length)} B（${size(bytes.length)}）`)),
     verdictEl(v, sn),
-    dump(bytes, fileBase, limit, sn.evidence),
+    mark ? h("div", { class: "dim small" }, `強調: ${mark.label}（Payload 上 +${num(mark.offset)} から ${num(mark.length)} B）`) : null,
+    dump(bytes, fileBase, limit, sn.evidence, mark),
     sn.kind === "text" ? h("pre", { class: "text-preview" }, new TextDecoder().decode(bytes.subarray(0, 400)) + (bytes.length > 400 ? " …" : "")) : null,
   );
 }
 
-function dump(bytes: Uint8Array, fileBase: number | undefined, limit: number, evidence: ByteSpan | undefined) {
-  const n = Math.min(bytes.length, limit);
+function dump(bytes: Uint8Array, fileBase: number | undefined, limit: number, evidence: ByteSpan | undefined, mark?: ByteSpan) {
+  // 強調する範囲があれば、その 2 行手前から見せる（数百 KB の Payload の奥にある feature まで「もっと表示」を押させないため）
+  const start = mark ? Math.max(0, Math.floor(mark.offset / 16) * 16 - 32) : 0;
+  const n = Math.min(bytes.length, start + limit);
   const rows: HTMLElement[] = [];
-  for (let r = 0; r < n; r += 16) {
+  if (start > 0) rows.push(h("div", { class: "dim small" }, `… 先頭 ${num(start)} byte は省略`));
+  for (let r = start; r < n; r += 16) {
     const cells: HTMLElement[] = [];
     const chars: string[] = [];
     for (let i = r; i < Math.min(r + 16, n); i++) {
       const b = bytes[i]!;
       const ev = evidence && i >= evidence.offset && i < evidence.offset + evidence.length;
-      cells.push(h("span", { class: `b${ev ? " ev" : ""}` }, hexByte(b)));
+      const mk = mark && i >= mark.offset && i < mark.offset + mark.length;
+      cells.push(h("span", { class: `b${ev ? " ev" : ""}${mk ? " mk" : ""}` }, hexByte(b)));
       if (i - r === 7) cells.push(h("span", { class: "mid" }, " "));
       chars.push(b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : "·");
     }

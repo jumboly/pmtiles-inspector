@@ -5,16 +5,20 @@ import { HttpRangeSource } from "../core/source/http-range-source";
 import { LocalFileSource } from "../core/source/local-file-source";
 import { TracingByteSource } from "../core/source/tracing-byte-source";
 import type { ByteSource } from "../core/source/types";
+import { hitTest } from "../tile-inspector/mvt/hit-test";
+import { inspectContent, type ContentResult } from "./content";
 import { isPlainDirectory } from "./directory-util";
 import { buildTraceSteps, isPhysicalStep } from "./trace-steps";
 import { sizeBytes, sizeFromProbe, type ArchiveSize } from "./archive-size";
-import type { AppState, DirColumn, DirView, HexWindow, HoverTile, SourceDesc } from "./state";
+import type { AppState, ContentSel, DirColumn, DirView, HexWindow, HoverTile, SourceDesc, TilePick, TraceView } from "./state";
 import type { Store } from "./store";
 
 /** Hex Viewer が 1 度に読む量。巨大 section を開いても全体を読まないための上限 */
 export const HEX_PAGE_SIZE = 4096;
 /** Directory Viewer の 1 ページの entry 数。leaf は 4096 entry 程度になるので全行は描かない */
 export const DIR_PAGE_SIZE = 200;
+/** Content Inspector の feature 一覧の 1 ページの行数 */
+export const FEATURE_PAGE_SIZE = 100;
 /** Auto 再生の 1 段あたりの時間。各パネルの連動を目で追える程度に遅くする */
 const TRACE_AUTO_INTERVAL_MS = 1200;
 /**
@@ -229,8 +233,9 @@ export class Controller {
    * z/x/y から Tile Entry までを辿る。
    * 探索に必要な leaf は読む（Read Trace に残る）が、tile data は読まない。
    * tile data は Range Read の段に進んだときに初めて読む（Tile Addressing と Physical Read を別の段階として見せるため）。
+   * pick は地図のクリック地点。tile を読んだ時点で、その地点の feature を Content Inspector で選ぶ。
    */
-  async traceTile(z: number, x: number, y: number) {
+  async traceTile(z: number, x: number, y: number, pick?: TilePick) {
     const archive = this.store.get().archive;
     if (!archive) return;
     const seq = ++this.traceSeq;
@@ -242,7 +247,7 @@ export class Controller {
       // Tile Entry（または探索の結論）の段で止める。その先の Physical Read は Next で進んだときに I/O する
       const stop = buildTraceSteps(lookup).findIndex((s) => s.kind === "result");
       const zoomPatch = z === this.store.get().hilbertZoom ? {} : hilbertZoomPatch(z);
-      this.store.set({ trace: { lookup, step: stop }, traceLoading: undefined, ...zoomPatch });
+      this.store.set({ trace: { lookup, step: stop, pick, contentSel: { page: 0 } }, traceLoading: undefined, ...zoomPatch });
       this.traceStep(stop);
     } catch (e) {
       // z/x/y の範囲外など、lookup を始める前の入力エラー
@@ -307,13 +312,46 @@ export class Controller {
       const t = this.store.get().trace;
       // 読んでいる間に別のタイルを Trace し直していたら結果は捨てる（Read Trace には記録として残る）
       if (t?.lookup !== lookup) return;
-      this.store.set({ trace: { ...t, tile }, traceLoading: undefined });
+      // Content Inspector は tile と同時に掛ける。地図の強調表示と Content Inspector パネルが同じ decode 結果を共有するため
+      const content = inspectContent(archive.header.tileType, tile);
+      const contentSel = t.pick ? pickIn(content, t.pick, t.contentSel) : initialSel(content);
+      this.store.set({ trace: { ...t, tile, content, contentSel }, traceLoading: undefined });
       this.traceStep(t.step);
     } catch (e) {
       if (this.store.get().trace?.lookup === lookup) this.store.set({ traceLoading: undefined, traceError: message(e) });
     } finally {
       if (this.tileLoading === lookup) this.tileLoading = undefined;
     }
+  }
+
+  /**
+   * 地図のクリック地点で feature を選び直す。Trace 中のタイルをもう読んである場合だけ呼ばれ、I/O は起きない
+   * （同じタイルを Trace し直すと Read Trace に同じ read が重なるだけなので）。
+   */
+  pickFeature(pick: TilePick) {
+    const t = this.store.get().trace;
+    if (!t) return;
+    this.store.set({ trace: { ...t, pick, contentSel: t.content ? pickIn(t.content, pick, t.contentSel) : t.contentSel } });
+  }
+
+  selectContentLayer(layer: number) {
+    this.patchContent({ layer, feature: undefined, page: 0, hits: undefined, pickNote: undefined });
+  }
+
+  /** feature を選ぶ。一覧のページも feature が見える位置に合わせる（地図や当たり判定から選んだときのため） */
+  selectFeature(layer: number, feature: number | undefined) {
+    const t = this.store.get().trace;
+    this.patchContent({ layer, feature, page: feature === undefined ? 0 : Math.floor(feature / FEATURE_PAGE_SIZE), hits: t?.contentSel.hits });
+  }
+
+  featurePage(page: number) {
+    const sel = this.store.get().trace?.contentSel;
+    if (sel) this.patchContent({ ...sel, page });
+  }
+
+  private patchContent(sel: ContentSel) {
+    const t = this.store.get().trace;
+    if (t) this.store.set({ trace: { ...t, contentSel: { ...t.contentSel, ...sel } } });
   }
 
   /** 先頭の段から自動で進める。最後の段に着いたら止まる */
@@ -393,6 +431,22 @@ export class Controller {
     const r = await source.read(start, end - start, { purpose: "viewer-inspect", label: `hex: ${section.name}` });
     this.store.set({ hex: { baseOffset: start, bytes: r.bytes, origin: "viewer-inspect", section } });
   }
+}
+
+/** 最初に見せる layer。feature が一番多い layer にする（小さな layer から見せると「中身が無い」ように見えるため） */
+function initialSel(c: ContentResult): ContentSel {
+  if (c.kind !== "mvt" || !c.mvt.layers.length) return { page: 0 };
+  const top = c.mvt.layers.reduce((a, l) => (l.features.length > a.features.length ? l : a));
+  return { layer: top.index, page: 0 };
+}
+
+/** クリック地点に当たる feature を選ぶ。当たらなければ layer の選択はそのままにして、理由を残す */
+function pickIn(c: ContentResult, pick: TilePick, cur: TraceView["contentSel"]): ContentSel {
+  if (c.kind !== "mvt") return cur.layer === undefined ? initialSel(c) : cur;
+  const hits = hitTest(c.mvt, pick.fx, pick.fy, pick.tolerance, c.geometry);
+  const first = hits[0];
+  if (!first) return { ...(cur.layer === undefined ? initialSel(c) : cur), feature: undefined, hits: [], pickNote: "クリック地点には feature がありません" };
+  return { layer: first.layer, feature: first.feature, page: Math.floor(first.feature / FEATURE_PAGE_SIZE), hits, pickNote: undefined };
 }
 
 /** ズームを変えたら曲線の表示も既定に戻す。低ズームで消したまま高ズームへ行く等の迷いを減らすため */

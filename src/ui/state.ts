@@ -2,7 +2,9 @@ import type { DirectoryRecord, MetadataRecord, PmtilesArchive, TileLookup, TileR
 import type { HeaderKey, SectionName } from "../core/pmtiles/header";
 import type { FileLayout } from "../core/pmtiles/layout";
 import type { ReadRecord, TracingByteSource } from "../core/source/tracing-byte-source";
+import type { FeatureHit } from "../tile-inspector/mvt/hit-test";
 import type { ArchiveSize } from "./archive-size";
+import type { ContentResult } from "./content";
 
 /** 何を開いているか。Local と HTTP で「同じ archive をどう読んだか」を見比べられるよう区別して持つ */
 export type SourceDesc = { kind: "local"; name: string } | { kind: "http"; url: string };
@@ -59,6 +61,35 @@ export interface TraceView {
    * 一度読んだら保持し、段を戻って進み直しても再 read しない（Read Trace に同じ read を重ねないため）。
    */
   tile?: TileRead;
+  /** tile を読んだ時点で Content Inspector に掛けた結果（Payload から作るので tile と同時に決まる） */
+  content?: ContentResult;
+  /**
+   * 地図をクリックして始めた Trace の、クリック地点（tile 内の位置）。
+   * Trace は Tile Entry で止まるので、tile を読んだ時点でこの地点の feature を選ぶために覚えておく。
+   */
+  pick?: TilePick;
+  contentSel: ContentSel;
+}
+
+/** tile 内の位置。tile の幅を 1 とした割合で持つ（layer ごとに extent が違うので、座標にするのは layer ごと） */
+export interface TilePick {
+  fx: number;
+  fy: number;
+  /** 当たり判定の許容距離（tile の幅に対する割合。地図の画面上で数 px 相当） */
+  tolerance: number;
+}
+
+/** Content Inspector で今見ているもの */
+export interface ContentSel {
+  layer?: number;
+  /** layer 内の feature index */
+  feature?: number;
+  /** feature 一覧のページ番号（数千 feature の layer があるため全行は描かない） */
+  page: number;
+  /** 最後の当たり判定の候補（点 → 線 → 面の順）。重なった feature を選び直せるようにする */
+  hits?: FeatureHit[];
+  /** 当たり判定の結果の説明（何も無かった等） */
+  pickNote?: string;
 }
 
 /**

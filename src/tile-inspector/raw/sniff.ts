@@ -1,4 +1,4 @@
-import type { ByteSpan } from "../../core/pmtiles/span";
+import type { ByteSpan } from "../span";
 
 /**
  * bytes の先頭から「実際には何の形式に見えるか」を推定する。

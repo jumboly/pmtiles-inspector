@@ -10,6 +10,7 @@ import type { Store } from "../store";
 import { traceBudget } from "../trace-reads";
 import { buildTraceSteps, isPhysicalStep, stepTitle, type UiTraceStep } from "../trace-steps";
 import { sniff } from "../../tile-inspector/raw/sniff";
+import { contentSummary, type ContentResult } from "../content";
 
 /**
  * Tile Trace: z/x/y から Tile Entry を経て、Range Read → Tile Decompression → Tile Payload までを段ごとに追う。
@@ -113,7 +114,7 @@ function traceView(archive: PmtilesArchive, t: TraceView, playing: boolean, ctl:
             "button",
             { class: `trace-step ${i === current ? "current" : i < current ? "done" : "todo"} k-${s.kind}${isPhysicalStep(s) ? " k-physical" : ""}`, onclick: () => ctl.traceStep(i) },
             h("b", {}, stepTitle(s, lookup)),
-            h("span", {}, stepOutput(s, lookup, t.tile)),
+            h("span", {}, stepOutput(s, lookup, t.tile, t.content)),
           ),
         ),
       ),
@@ -123,7 +124,7 @@ function traceView(archive: PmtilesArchive, t: TraceView, playing: boolean, ctl:
 }
 
 /** 段のチップに出す短い出力値 */
-function stepOutput(s: UiTraceStep, lookup: TileLookup, tile: TileRead | undefined): string {
+function stepOutput(s: UiTraceStep, lookup: TileLookup, tile: TileRead | undefined, content: ContentResult | undefined): string {
   const a = lookup.address;
   switch (s.kind) {
     case "zxy":
@@ -149,6 +150,8 @@ function stepOutput(s: UiTraceStep, lookup: TileLookup, tile: TileRead | undefin
       return tile ? (tile.payload ? `${compressionName(tile.compression)} → ${size(tile.payload.length)}` : "解凍できない") : "—";
     case "payload":
       return tile ? sniff(tile.payload ?? tile.raw).kind : "—";
+    case "content":
+      return content ? contentSummary(content) : "—";
   }
 }
 
@@ -297,6 +300,24 @@ function stepDetail(archive: PmtilesArchive, s: UiTraceStep, t: TraceView, rc: R
         h("p", {}, `推定の根拠: ${sn.reason}。Header の宣言と中身の比較は Tile Payload パネルで確認できる。`),
         budgetTable(archive, t, tile, rc.total),
         h("p", { class: "dim" }, "この bytes を MVT / Raster などの Content Inspector に渡す。Content Inspector は bytes だけを受け取り、PMTiles の offset や directory は知らない。"),
+      );
+    }
+    case "content": {
+      const c = t.content;
+      if (!c) return box("Content Inspector", h("p", { class: "note" }, "tile を読み込み中…"));
+      return box(
+        "Content Inspector: ここから先は PMTiles ではなくタイル形式の世界",
+        io(`Tile Payload ${num(c.bytes.length)} byte`, contentSummary(c)),
+        h("p", {}, `Inspector の選び方: ${c.why}。`),
+        h(
+          "p",
+          { class: "dim" },
+          c.kind === "mvt"
+            ? "layer / feature / properties / geometry は Content Inspector パネルで見られる。地図をクリックすると、その地点の feature を選ぶ（Trace 中のタイルなら再読み込みせずに選び直す）。"
+            : c.kind === "raster"
+              ? "寸法を header のどの byte から読んだかと、ブラウザが decode した画像を Content Inspector パネルで並べる。"
+              : "対応する Inspector が無い・読めないので、Raw（bytes のまま）で見せる。",
+        ),
       );
     }
   }

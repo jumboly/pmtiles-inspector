@@ -16,6 +16,7 @@
       <section class="panel" id="p-layout"><h2>File Layout <small>物理配置</small></h2><div class="body"></div></section>
       <section class="panel" id="p-trace"><h2>Tile Trace <small>z/x/y → TileID → Root / Leaf → Tile Entry → Range Read → Payload</small></h2><div class="body"></div></section>
       <section class="panel" id="p-payload"><h2>Tile Payload <small>読んだ bytes → Tile Decompression → Payload</small></h2><div class="body"></div></section>
+      <section class="panel" id="p-content"><h2>Content Inspector <small>Payload → MVT（layer / feature / geometry）/ Raster / Raw</small></h2><div class="body"></div></section>
       <section class="panel" id="p-hilbert"><h2>Hilbert / TileID <small>ズームごとの grid と Hilbert 曲線</small></h2><div class="body"></div></section>
       <section class="panel" id="p-search"><h2>Directory Search <small>TileID → Entry の binary search</small></h2><div class="body"></div></section>
       <section class="panel" id="p-header"><h2>Header Inspector <small>先頭 127 byte</small></h2><div class="body"></div></section>
@@ -63,6 +64,11 @@
             同梱ではなく <code>r2-public.protomaps.com</code> から HTTP Range Request で読む。
             Terrarium は上記と同じ Terrain Tiles（帰属表示は上記のとおり）。
             Overture POI は <a href="https://overturemaps.org/">Overture Maps Foundation</a> の Places データ。
+          </dd>
+          <dt>リモート: Protomaps basemap Firenze</dt>
+          <dd>
+            同梱ではなく <code>pmtiles.io</code>（公式 Viewer のサンプル）から HTTP Range Request で読む。
+            データは © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>（ODbL）。
           </dd>
           <dt>背景地図</dt>
           <dd><a href="https://demotiles.maplibre.org/">MapLibre demotiles</a>（国境・海岸線。地図の右下にも帰属表示が出ます）。</dd>

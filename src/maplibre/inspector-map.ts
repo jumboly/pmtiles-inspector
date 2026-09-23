@@ -6,7 +6,7 @@ import type { PmtilesArchive } from "../core/pmtiles/archive";
 import { MAX_ZOOM, type TileBlock } from "../core/pmtiles/tileid";
 import { ARCHIVE_SOURCE, archiveStyle, TILE_SIZE, type ArchiveStyle } from "./archive-style";
 import { registerArchive, unregisterArchive, type MapTileOutcome } from "./protocol";
-import { blocksPolygon, lngLatToTile, rectRing, tileBounds, tileCenter, tilePolygon, type TileXYZ } from "./tile-geometry";
+import { blocksPolygon, lngLatToTile, lngLatToTilePoint, rectRing, tileBounds, tileCenter, tilePolygon, type TileXYZ } from "./tile-geometry";
 
 /**
  * PMTiles Internals Viewer 用の地図。
@@ -17,6 +17,8 @@ import { blocksPolygon, lngLatToTile, rectRing, tileBounds, tileCenter, tilePoly
 
 export interface InspectorMapColors {
   selected: string;
+  /** Content Inspector で選んだ feature */
+  feature: string;
   hover: string;
   region: string;
   grid: string;
@@ -39,7 +41,8 @@ export interface MapViewInfo {
 
 export interface InspectorMapOptions {
   colors: InspectorMapColors;
-  onTileClick(t: TileXYZ): void;
+  /** at はクリック地点のタイル内の位置と、当たり判定の許容距離（どちらもタイルの幅を 1 とした割合） */
+  onTileClick(t: TileXYZ, at: { fx: number; fy: number; tolerance: number }): void;
   onTileHover(t: TileXYZ | undefined): void;
   onView(info: MapViewInfo): void;
   onTileError(message: string): void;
@@ -62,7 +65,11 @@ const OVERLAY = {
   grid: "pi-grid",
   selected: "pi-selected",
   hover: "pi-hover",
+  feature: "pi-feature",
 } as const;
+
+/** クリックの当たり判定の半径（画面上の px）。細い線や点を指で狙える程度 */
+const PICK_RADIUS_PX = 6;
 
 type PaintProp = Parameters<MlMap["setPaintProperty"]>[1];
 
@@ -107,7 +114,11 @@ export class InspectorMap {
     map.on("move", () => this.scheduleGrid());
     map.on("click", (e) => {
       const z = this.tileZoomAt();
-      if (z !== undefined) this.opts.onTileClick(lngLatToTile(e.lngLat.lng, e.lngLat.lat, z));
+      if (z === undefined) return;
+      const { fx, fy, ...t } = lngLatToTilePoint(e.lngLat.lng, e.lngLat.lat, z);
+      // overzoom 中はタイルが画面上で 512px より大きく描かれるので、許容距離をタイル幅に対する割合に直すときに拡大率を入れる
+      const tilePx = TILE_SIZE * 2 ** (this.map.getZoom() - z);
+      this.opts.onTileClick(t, { fx, fy, tolerance: PICK_RADIUS_PX / tilePx });
     });
     map.on("mousemove", (e) => {
       const z = this.tileZoomAt();
@@ -171,6 +182,12 @@ export class InspectorMap {
     await this.ready;
     this.src(OVERLAY.selected).setData(tile ? { type: "FeatureCollection", features: [tilePolygon(tile)] } : EMPTY);
     this.src(OVERLAY.region).setData(region.length ? { type: "FeatureCollection", features: [blocksPolygon(region)] } : EMPTY);
+  }
+
+  /** Content Inspector で選んだ feature（経緯度に写した GeoJSON）。undefined で消す */
+  async setFeature(feature: Feature | undefined) {
+    await this.ready;
+    this.src(OVERLAY.feature).setData(feature ? { type: "FeatureCollection", features: [feature] } : EMPTY);
   }
 
   /** Hilbert Viewer など、地図の外でカーソルが載っているタイル */
@@ -283,6 +300,16 @@ function overlayLayers(c: InspectorMapColors, glyphs: boolean): LayerSpecificati
     { id: `${OVERLAY.selected}-fill`, type: "fill", source: OVERLAY.selected, paint: { "fill-color": c.selected, "fill-opacity": 0.12 } },
     { id: `${OVERLAY.selected}-line`, type: "line", source: OVERLAY.selected, paint: { "line-color": c.selected, "line-width": 3 } },
     { id: `${OVERLAY.hover}-line`, type: "line", source: OVERLAY.hover, paint: { "line-color": c.hover, "line-width": 2, "line-dasharray": [2, 1] } },
+    // feature はタイル枠より上に描く。枠の太線に重なって見えなくならないように
+    { id: `${OVERLAY.feature}-fill`, type: "fill", source: OVERLAY.feature, filter: ["==", ["geometry-type"], "Polygon"], paint: { "fill-color": c.feature, "fill-opacity": 0.3 } },
+    { id: `${OVERLAY.feature}-line`, type: "line", source: OVERLAY.feature, filter: ["!=", ["geometry-type"], "Point"], paint: { "line-color": c.feature, "line-width": 3 } },
+    {
+      id: `${OVERLAY.feature}-circle`,
+      type: "circle",
+      source: OVERLAY.feature,
+      filter: ["==", ["geometry-type"], "Point"],
+      paint: { "circle-color": c.feature, "circle-radius": 6, "circle-stroke-color": c.halo, "circle-stroke-width": 2 },
+    },
   ];
   // 字形（glyphs）が取れないとき（背景地図の style を読めなかったとき）は z/x/y の文字だけ諦める
   if (glyphs) {

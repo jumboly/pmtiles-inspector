@@ -16,12 +16,15 @@ export type UiTraceStep =
   /** ここから Physical Read。Tile Entry が見つかったときだけ現れる */
   | { kind: "range-read" }
   | { kind: "tile-decompress" }
-  | { kind: "payload" };
+  | { kind: "payload" }
+  /** PMTiles の外側: Payload を MVT / Raster / Raw の Inspector に渡す */
+  | { kind: "content" };
 
-export type PhysicalStepKind = "range-read" | "tile-decompress" | "payload";
+export type PhysicalStepKind = "range-read" | "tile-decompress" | "payload" | "content";
 
+/** tile data を読む段とその後の段。これらの段ではファイル上の選択を「読んだ tile の bytes」にする */
 export function isPhysicalStep(s: UiTraceStep | undefined): s is Extract<UiTraceStep, { kind: PhysicalStepKind }> {
-  return s?.kind === "range-read" || s?.kind === "tile-decompress" || s?.kind === "payload";
+  return s?.kind === "range-read" || s?.kind === "tile-decompress" || s?.kind === "payload" || s?.kind === "content";
 }
 
 export function buildTraceSteps(lookup: TileLookup): UiTraceStep[] {
@@ -33,7 +36,7 @@ export function buildTraceSteps(lookup: TileLookup): UiTraceStep[] {
   }
   out.push({ kind: "result" });
   // 段の数は lookup の結論だけで決まる（read の前から見えている）。まだ辿っていない段を「これから起こること」として見せるため
-  if (lookup.result.status === "found") out.push({ kind: "range-read" }, { kind: "tile-decompress" }, { kind: "payload" });
+  if (lookup.result.status === "found") out.push({ kind: "range-read" }, { kind: "tile-decompress" }, { kind: "payload" }, { kind: "content" });
   return out;
 }
 
@@ -57,6 +60,8 @@ export function stepTitle(s: UiTraceStep, lookup: TileLookup): string {
       return "Tile Decompression";
     case "payload":
       return "Tile Payload";
+    case "content":
+      return "Content Inspector";
   }
 }
 
